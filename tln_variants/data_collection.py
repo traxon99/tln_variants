@@ -8,17 +8,22 @@ import time
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Joy
 
+# Gather hour/min/sec for csv file name
+
 hour = str(time.localtime().tm_hour)
 min = str(time.localtime().tm_min)
 sec = str(time.localtime().tm_sec)
 EXPORT_PATH = 'src/tln_variants/train/dataset/recording-'+ hour + ':' + min + ':' + sec + '.csv'
-#EXPORT_PATH = 'data'+ hour + '-' + min + '-' + sec + '.csv'
+
 
 CONTROLLER = True
 
 class DataCollection(Node):
     def __init__(self):
         super().__init__('data_collection_node')
+
+        #Create csv writer
+
         self.csvfile = open(EXPORT_PATH,'w')
         self.writer = csv.writer(self.csvfile)
 
@@ -54,11 +59,15 @@ class DataCollection(Node):
 
         subscription_list.append(self.scan_subscription)
         subscription_list.append(self.ackermann_subscription)
-        subscription_list.append(self.odom_subscription)     
+        subscription_list.append(self.odom_subscription) 
+
         #self.get_logger().info(f"Subscribed to {subscription_list}")
         
         # DATA RECORDING GRANULARITY HERE. SLOP VALUE IS 5 MS
         # ts = message_filters.ApproximateTimeSynchronizer(subscription_list,10, 0.0005) # 5 ms
+
+        #Message sync for data recording
+
         ts = message_filters.ApproximateTimeSynchronizer(subscription_list, 10, 0.0005) # 90 ms
 
         self.get_logger().warn(f'Data recording Node Initialized.')
@@ -67,17 +76,26 @@ class DataCollection(Node):
         self.recording = False
 
     def joy_callback(self, msg):
+        # todo
         pass
     def write(self, scan_msg, ack_msg, odom_msg):
+        
+        #obtain velocity from odom
+
         vel_x = odom_msg.twist.twist.linear.x
         vel_y = odom_msg.twist.twist.linear.y
-        vel_mag = (vel_x**2 + vel_y**2)**0.5
-        if CONTROLLER == True: 
+        vel_mag = (vel_x**2 + vel_y**2)**0.5 #velocity magnitude
+
+        if CONTROLLER == True:
+            #todo
             pass
         self.get_logger().info("Data written")
         #self.get_logger().info(f"{list(scan_msg.ranges)}")
         # self.writer.writerow([ack_msg.drive.speed, ack_msg.drive.steering_angle, vel_mag, scan_msg.ranges])#, vel_mag])
-        self.writer.writerow([ack_msg.drive.speed, ack_msg.drive.steering_angle, vel_mag, list(scan_msg.ranges)])#, vel_mag])
+
+        # Finally, write row
+
+        self.writer.writerow([ack_msg.drive.speed, ack_msg.drive.steering_angle, vel_mag, list(scan_msg.ranges)])
 
     def close_file(self):
         self.csvfile.close()
