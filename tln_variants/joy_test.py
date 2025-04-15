@@ -1,3 +1,6 @@
+### Node to test whether joystick is working or not.
+
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
