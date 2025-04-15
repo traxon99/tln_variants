@@ -1,8 +1,9 @@
+
 #Requirement Library
 import os
 #os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # If you want utilize GPU, uncomment this line
 from sklearn.utils import shuffle
-import rosbag
+import csv
 import time
 import subprocess
 import numpy as np
@@ -10,8 +11,8 @@ import tensorflow as tf
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from tensorflow.python.keras.losses import huber
-from tensorflow.python.keras.optimizers import Adam
+from tensorflow.keras.losses import huber
+from tensorflow.keras.optimizers import Adam
 
 # Check GPU availability - You don't need a gpu to train this model
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -49,9 +50,7 @@ model_files = [
     './Models/'+model_name+'_int8.tflite'
 ]
 dataset_path = [
-    './Dataset/out.bag', 
-    './Dataset/f2.bag', 
-    './Dataset/f4.bag',
+    './dataset/dataset_ftg_spielberg_bothdir.csv'
 ]
 loss_figure_path = './Figures/loss_curve.png'
 down_sample_param = 2 # Down-sample Lidar data
@@ -68,62 +67,70 @@ min_speed = 0
 #========================================================
 # Get Dataset
 #========================================================
+lidar_data = []
+servo_data = []
+speed_data = []
 
 # Iterate through bag files
 for pth in dataset_path:
     if not os.path.exists(pth):
-        print(f"out.bag doesn't exist in {pth}")
+        print(f"dataset doesn't exist in {pth}")
         exit(0)
-    good_bag = rosbag.Bag(pth)
+    with open(pth, 'r') as csvfile:
+      csvreader = csv.reader(csvfile, delimiter=',')
 
-    lidar_data = []
-    servo_data = []
-    speed_data = []
 
-    # Read messages from bag file
-    for topic, msg, t in good_bag.read_messages():
-        if topic == 'Lidar':
-            ranges = msg.ranges[::down_sample_param]
-            lidar_data.append(ranges)
-        if topic == 'Ackermann':
-            data = msg.drive.steering_angle
-            s_data = msg.drive.speed
-            
-            servo_data.append(data)
-            if s_data > max_speed:
-                max_speed = s_data
-            speed_data.append(s_data)
+      for row in csvreader:
+        clean_speed = float(row[0])
+        clean_servo = float(row[1])
+        clean_lidar = list(map(float, row[2].translate(str.maketrans("", "", "[]")).split(',')))
+        if clean_speed > max_speed:
+                max_speed = clean_speed
 
-    # Convert data to arrays
-    lidar_data = np.array(lidar_data) 
-    servo_data = np.array(servo_data)
-    speed_data = np.array(speed_data)
+        speed_data.append(clean_speed)
+        servo_data.append(clean_servo)
+        lidar_data.append(clean_lidar)
 
-    # Shuffle data
-    shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
-    shuffled_lidar_data = shuffle(lidar_data, random_state=62)
+print("length of lidar: ", len(lidar_data[0]))
+print(len(speed_data))
+print(len(servo_data))
+print(len(lidar_data))
 
-    # Split data into train and test sets
-    train_ratio = 0.85
-    train_samples = int(train_ratio * len(shuffled_lidar_data))
-    x_train_bag, x_test_bag = shuffled_lidar_data[:train_samples], shuffled_lidar_data[train_samples:]
+print([len(x) for x in lidar_data if hasattr(x, '__len__')])
+lidar_data = lidar_data[:-1]
+speed_data = speed_data[:-1]
+servo_data = servo_data[:-1]
 
-    # Extract servo and speed values
-    y_train_bag = shuffled_data[:train_samples]
-    y_test_bag = shuffled_data[train_samples:]
+# Convert data to arrays
+lidar_data = np.array(lidar_data)
+servo_data = np.array(servo_data)
+speed_data = np.array(speed_data)
 
-    # Extend lists with train and test data
-    lidar.extend(x_train_bag)
-    servo.extend(y_train_bag[:, 0])
-    speed.extend(y_train_bag[:, 1])
+# Shuffle data
+shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
+shuffled_lidar_data = shuffle(lidar_data, random_state=62)
 
-    test_lidar.extend(x_test_bag)
-    test_servo.extend(y_test_bag[:, 0])
-    test_speed.extend(y_test_bag[:, 1])
+# Split data into train and test sets
+train_ratio = 0.85
+train_samples = int(train_ratio * len(shuffled_lidar_data))
+x_train_bag, x_test_bag = shuffled_lidar_data[:train_samples], shuffled_lidar_data[train_samples:]
 
-    print(f'\nData in {pth}:')
-    print(f'Shape of Train Data --- Lidar: {len(lidar)}, Servo: {len(servo)}, Speed: {len(speed)}')
-    print(f'Shape of Test Data --- Lidar: {len(test_lidar)}, Servo: {len(test_servo)}, Speed: {len(test_speed)}')
+# Extract servo and speed values
+y_train_bag = shuffled_data[:train_samples]
+y_test_bag = shuffled_data[train_samples:]
+
+# Extend lists with train and test data
+lidar.extend(x_train_bag)
+servo.extend(y_train_bag[:, 0])
+speed.extend(y_train_bag[:, 1])
+
+test_lidar.extend(x_test_bag)
+test_servo.extend(y_test_bag[:, 0])
+test_speed.extend(y_test_bag[:, 1])
+
+print(f'\nData in {pth}:')
+print(f'Shape of Train Data --- Lidar: {len(lidar)}, Servo: {len(servo)}, Speed: {len(speed)}')
+print(f'Shape of Test Data --- Lidar: {len(test_lidar)}, Servo: {len(test_servo)}, Speed: {len(test_speed)}')
 
 # Calculate total number of samples
 total_number_samples = len(lidar)
@@ -349,7 +356,7 @@ all_inference_times_micros = []
 for model_name in model_files:
     y_pred, inference_times_micros = evaluate_model(model_name, test_lidar, test_data)
     all_inference_times_micros.append(inference_times_micros)
-    
+
     print(f'Huber Loss for {model_name}: {huber_loss(test_data, y_pred)}\n')
 
 # Plot inference times

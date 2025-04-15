@@ -21,8 +21,14 @@ setup(
         'console_scripts': [
             'tln_standard = tln_variants.tln_standard:main',
             'tln_temporal = tln_variants.tln_temporal:main',
+            'ftg = tln_variants.ftg:main',
             'evaluation = tln_variants.evaluation:main',
-            'collect = tln_variants.data_collection:main'
+            'collect = tln_variants.data_collection:main',
+            'ftg_opp = tln_variants.ftg_opp:main',
+            'joy_node_drive = tln_variants.joy:main',
+            'joy_test = tln_variants.joy_test:main',
+            'tln_override = tln_variants.tln_standard_override:main',
+            'tln_vel = tln_variants.tln_standard_vel:main'
         ],
     },
 )

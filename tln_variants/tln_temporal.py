@@ -20,11 +20,12 @@ class TLNStandard(Node):
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.get_logger().info('TLNNode has been started.')
 
-        self.model_path = "src/tln_variants/models/f1_tenth_model_temporal_M_noquantized.tflite"
+        self.model_path = "src/tln_variants/models/TLN_temporal_test.tflite"
         #self.model_path = "src/tln_variants/models/f1_tenth_model_small_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
+        self.input_shape = self.interpreter.get_input_details()[0]["shape"]
         self.output_index = self.interpreter.get_output_details()[0]["index"]
         self.scan_buffer = np.zeros((2, 20))
 
@@ -42,10 +43,9 @@ class TLNStandard(Node):
 
         #temporal scans (t-10, t-20)
 
-        self.t_1_scans = deque(maxlen=1)  # Last 1 scans
         self.t_5_scans = deque(maxlen=5)  # Last 5 scans
         self.t_10_scans = deque(maxlen=10)  # Last 1 scans
-         
+   
 
     def linear_map(self, x, x_min, x_max, y_min, y_max):
         return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
@@ -101,30 +101,57 @@ class TLNStandard(Node):
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges)
-        scans = np.append(scans, [20])
+        # scans = np.append(scans, [20])
         noise = np.random.normal(0, 0.5, scans.shape)
         scans = scans + noise
         scans[scans > 10] = 10
-        scans = scans[::2]  # Downsample
+        # scans = scans[::2]  # Downsample
 
-        # Append the current scan to both t_10_scans and t_20_scans
-        self.t_1_scans.append(scans)
-        self.t_5_scans.append(scans)
-        self.t_10_scans.append(scans)
+        # # Append the current scan to both t_10_scans and t_20_scans
+        # self.t_1_scans.append(scans)
+        # self.t_5_scans.append(scans)
+        # self.t_10_scans.append(scans)
         
-        # Ensure the shape of t_1, t_5, and t_10 is (541,)
-        if len(self.t_1_scans) >= 1:
-            t_1 = self.t_1_scans[-1]  # Get the most recent scan from t_1_scans
-        else:
-            t_1 = np.zeros_like(scans)  # Default if not enough data
+        # # Ensure the shape of t_1, t_5, and t_10 is (541,)
+        # if len(self.t_1_scans) >= 1:
+        #     t_1 = self.t_1_scans[-1]  # Get the most recent scan from t_1_scans
+        # else:
+        #     t_1 = np.zeros_like(scans)  # Default if not enough data
 
-        if len(self.t_5_scans) >= 5:
-            t_5 = self.t_5_scans[-5]  # Get the 5th most recent scan from t_5_scans
+        # if len(self.t_5_scans) >= 5:
+        #     t_5 = self.t_5_scans[-5]  # Get the 5th most recent scan from t_5_scans
+        # else:
+        #     t_5 = np.zeros_like(scans)  # Default if not enough data
+
+        # if len(self.t_10_scans) >= 10:
+        #     t_10 = self.t_10_scans[-10]  # Get the 10th most recent scan from t_10_scans
+        # else:
+        #     t_10 = np.zeros_like(scans)  # Default if not enough data
+
+        # # # Combine current scan, t-10, and t-20 scans
+        # # print(scans.shape)  # Should be (541,)
+        # # print(t_1.shape)    # Should be (541,)
+        # # print(t_5.shape)    # Should be (541,)
+        # # print(t_10.shape)
+        #  # Append the current scan to both t_10_scans and t_20_scans
+        
+        # self.t_1_scans.append(scans)
+        # self.t_5_scans.append(scans)
+        # self.t_10_scans.append(scans)
+        
+        # # Ensure the shape of t_1, t_5, and t_10 is (541,)
+        # if len(self.t_1_scans) >= 1:
+        #     t_1 = self.t_1_scans[-1]  # Get the most recent scan from t_1_scans
+        # else:
+        #     t_1 = np.zeros_like(scans)  # Default if not enough data
+
+        if len(self.t_5_scans) >= 62:
+            t_5 = self.t_5_scans[-62]  # Get the 5th most recent scan from t_5_scans
         else:
             t_5 = np.zeros_like(scans)  # Default if not enough data
 
-        if len(self.t_10_scans) >= 10:
-            t_10 = self.t_10_scans[-10]  # Get the 10th most recent scan from t_10_scans
+        if len(self.t_10_scans) >= 125:
+            t_10 = self.t_10_scans[-125]  # Get the 10th most recent scan from t_10_scans
         else:
             t_10 = np.zeros_like(scans)  # Default if not enough data
 
@@ -134,19 +161,19 @@ class TLNStandard(Node):
         # print(t_5.shape)    # Should be (541,)
         # print(t_10.shape)
         
-        
+        scans_combined = np.stack((scans, t_5, t_10), axis=0)
         # Stack the arrays along a new axis (axis=-1) to form a tensor with shape (541, 4)
-        scans_combined = np.stack((scans, t_1, t_5, t_10), axis=0)  # Shape: (4, 541)
+        # scans_combined = np.stack((scans, t_1, t_5, t_10), axis=0)  # Shape: (4, 541)
         print(f"first: {scans_combined.shape}")
         # Add the batch dimension (Shape: (1, 4, 541)
-        scans_combined = np.expand_dims(scans_combined, axis=0)
+        # scans_combined = np.expand_dims(scans_combined, axis=0)
         print(f"second: {scans_combined.shape}")
         # Add the channel dimension (Shape: (1, 4, 541, 1))
         scans_combined = np.expand_dims(scans_combined, axis=-1).astype(np.float32)
         print(f"final: {scans_combined.shape}")
 
         # print(self.interpreter.get_input_details())
-
+        print("Input shape: ", self.input_shape)
         
         # Now the shape of scans_combined is (1, 4, 541, 1), which matches the model's input shape.
         self.interpreter.set_tensor(self.input_index, scans_combined)

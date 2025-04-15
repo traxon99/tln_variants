@@ -8,16 +8,19 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from collections import deque
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Joy
+
 
 #For average speed
 min_max = (0,0)
 
-class TLNStandard(Node):
+class TLNStandardOverride(Node):
     def __init__(self):
         super().__init__('tln_standard')
         self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        self.joy_subscription = self.create_subscription(Joy, '/joy', self.joy_callback, 10)
         self.get_logger().info('TLNNode has been started.')
 
         self.model_path = "src/tln_variants/models/f1_tenth_model_small_noquantized.tflite"
@@ -38,6 +41,12 @@ class TLNStandard(Node):
         
         #for evaluation
         self.speed_vals = np.array([])
+        
+        #for joystick override
+        self.steer_override = False    
+        self.speed_override = False
+        self.speed = 0
+        self.steering_angle = 0
 
     def linear_map(self, x, x_min, x_max, y_min, y_max):
         return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
@@ -64,9 +73,9 @@ class TLNStandard(Node):
         steer = output[0, 0]
         speed = output[0, 1]
 
-        min_speed = 0
-        max_speed = 10
-        speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
+        self.min_speed = 0
+        self.max_speed = 10
+        speed = self.linear_map(speed, 0, 1, self.min_speed, self.max_speed)
         self.speed_vals = np.append(self.speed_vals, speed)
         
         self.speed_queue.append(speed)
@@ -77,9 +86,32 @@ class TLNStandard(Node):
             self.destroy_node()
             rclpy.shutdown()
             quit()
+        
+        #Joystick override
+        if self.speed_override and self.steer_override: #All joystick
+            self.publish_ackermann_drive(self.speed, self.steering_angle)
+        elif self.speed_override and not(self.steer_override): #only speed
+            self.publish_ackermann_drive(self.speed, steer)
+        elif not(self.speed_override) and self.steer_override: #only steering
+            self.publish_ackermann_drive(speed, self.steering_angle)
+        else:
+            self.publish_ackermann_drive(speed, steer)
+    def joy_callback(self, msg):
 
-        self.publish_ackermann_drive(speed, steer)
+        #get values [0,1] from joysticks
+        left_js_up_down = msg.axes[1] #
+        right_js_left_right = msg.axes[3] #
+        
+        if (left_js_up_down != 0):
+            self.speed_override = True
+            self.speed = left_js_up_down * self.max_speed
 
+        elif (right_js_left_right != 0):
+            self.steer_override = True
+            self.steering_angle = right_js_left_right * 0.52
+        else:
+            self.steer_override = False
+            self.speed_override = False
     def publish_ackermann_drive(self, speed, steering_angle):
         ackermann_msg = AckermannDriveStamped()
         ackermann_msg.header = Header()
@@ -111,7 +143,7 @@ class TLNStandard(Node):
 def main(args=None):
 
     rclpy.init(args=args)
-    node = TLNStandard()
+    node = TLNStandardOverride()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -10,8 +10,8 @@ class Evaluation(Node):
         # Define a callback group
         self.callback_group = ReentrantCallbackGroup()
         
-        self.starting_x = 0
-        self.starting_y = 0
+        self.starting_x = 5.0
+        self.starting_y = 5.0
         self.finish_line_radius = 1
         
         # Pass the callback group when creating the subscription

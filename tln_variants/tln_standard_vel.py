@@ -14,16 +14,17 @@ min_max = (0,0)
 
 class TLNStandard(Node):
     def __init__(self):
-        super().__init__('tln_standard')
+        super().__init__('tln_vel')
         self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.get_logger().info('TLNNode has been started.')
 
-        self.model_path = "src/tln_variants/models/f1_tenth_model_small_noquantized.tflite"
+        self.model_path = "src/tln_variants/models/TLN_vel_maxdata_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
-        self.input_index = self.interpreter.get_input_details()[0]["index"]
+        self.scan_input_index = self.interpreter.get_input_details()[0]["index"]
+        self.velocity_input_index = self.interpreter.get_input_details()[1]["index"]
         self.output_index = self.interpreter.get_output_details()[0]["index"]
         self.scan_buffer = np.zeros((2, 20))
 
@@ -38,23 +39,28 @@ class TLNStandard(Node):
         
         #for evaluation
         self.speed_vals = np.array([])
+        self.velocity = 0.0
+        self.velocity = np.reshape(self.velocity, (1, 1))
+
+        
 
     def linear_map(self, x, x_min, x_max, y_min, y_max):
         return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges)
-        scans = np.append(scans, [20])
+        # scans = np.append(scans, [20])
         self.get_logger().info(f'num scans:{len(scans)}')
         noise = np.random.normal(0, 0.5, scans.shape)
         scans = scans + noise
         scans[scans > 10] = 10
-        scans = scans[::2]  # Use every other value
+        # scans = scans[::2]  # Use every other value
         scans = np.expand_dims(scans, axis=-1).astype(np.float32)
         scans = np.expand_dims(scans, axis=0)
 
+        self.interpreter.set_tensor(self.scan_input_index, scans)
+        self.interpreter.set_tensor(self.velocity_input_index, np.float32(self.velocity))
 
-        self.interpreter.set_tensor(self.input_index, scans)
         start_time = time.time()
         self.interpreter.invoke()
         inf_time = (time.time() - start_time) * 1000  # in milliseconds
@@ -64,19 +70,19 @@ class TLNStandard(Node):
         steer = output[0, 0]
         speed = output[0, 1]
 
-        min_speed = 0
-        max_speed = 10
+        min_speed = 2
+        max_speed = 12.36
         speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
         self.speed_vals = np.append(self.speed_vals, speed)
         
         self.speed_queue.append(speed)
 
-        if self.detect_crash():
-            self.get_logger().info("Crash")
-            self.publish_ackermann_drive(0,0)
-            self.destroy_node()
-            rclpy.shutdown()
-            quit()
+        # if self.detect_crash():
+        #     self.get_logger().info("Crash")
+        #     self.publish_ackermann_drive(0,0)
+        #     self.destroy_node()
+        #     rclpy.shutdown()
+        #     quit()
 
         self.publish_ackermann_drive(speed, steer)
 
@@ -91,9 +97,10 @@ class TLNStandard(Node):
         self.get_logger().info(f'Published AckermannDriveStamped message: speed={speed}, steering_angle={steering_angle}')
     
     def odom_callback(self, msg):
-        # Extract position and orientation from the Odometry message
-        self.position = msg.pose.pose.position
-        self.orientation = msg.pose.pose.orientation
+        vel_x = msg.twist.twist.linear.x
+        vel_y = msg.twist.twist.linear.y
+        self.velocity = (vel_x**2 + vel_y**2)**0.5
+        self.velocity = np.reshape(self.velocity, (1, 1))
 
     def detect_crash(self):
         for i in range(len(self.scan) - self.window_size + 1):
