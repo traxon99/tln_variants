@@ -50,54 +50,6 @@ class TLNStandard(Node):
     def linear_map(self, x, x_min, x_max, y_min, y_max):
         return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
 
-    # def scan_callback(self, msg):
-    #     scans = np.array(msg.ranges)
-    #     scans = np.append(scans, [20])
-    #     self.get_logger().info(f'num scans:{len(scans)}')
-    #     noise = np.random.normal(0, 0.5, scans.shape)
-    #     scans = scans + noise
-        
-    #     # scans[scans > 10] = 10
-    #     # scans = scans[::2]  # Use every other value
-
-    #     scans = np.array(msg.ranges)[::2]
-    #     scans = np.clip(scans, 0, 10)
-    #     scans = scans.astype(np.float32).reshape(1, -1, 1, 3)
-
-    #     # scans = np.expand_dims(scans, axis=-1).astype(np.float32)
-    #     # scans = np.expand_dims(scans, axis=0)
-
-    #     self.interpreter.set_tensor(self.input_index, scans)
-    #     start_time = time.time()
-    #     self.interpreter.invoke()
-    #     inf_time = (time.time() - start_time) * 1000  # in milliseconds
-    #     self.get_logger().info(f'Inference time: {inf_time:.2f} ms')
-
-    #     output = self.interpreter.get_tensor(self.output_index)
-    #     steer = output[0, 0]
-    #     speed = output[0, 1]
-
-    #     min_speed = 0
-    #     max_speed = 10
-    #     speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
-    #     self.speed_vals = np.append(self.speed_vals, speed)
-        
-    #     self.speed_queue.append(speed)
-
-    #     if self.detect_crash():
-    #         self.get_logger().info("Crash")
-    #         self.destroy_node()
-    #         rclpy.shutdown()
-    #         quit()
-
-    #     if self.scan_num % 10 == 0:
-    #         self.t_10_scan = scans
-    #     elif self.scan_num % 20 == 0:
-    #         self.t_20_scan = scans
-        
-    #     self.scan_num += 1
-    #     self.publish_ackermann_drive(speed, steer)
-
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges)
