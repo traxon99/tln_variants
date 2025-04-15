@@ -10,6 +10,7 @@ class Evaluation(Node):
         # Define a callback group
         self.callback_group = ReentrantCallbackGroup()
         
+        #starting point parameters
         self.starting_x = 5.0
         self.starting_y = 5.0
         self.finish_line_radius = 1
@@ -35,27 +36,33 @@ class Evaluation(Node):
         y = msg.pose.pose.position.y
         vel_x = msg.twist.twist.linear.x
         vel_y = msg.twist.twist.linear.y
-        vel_mag = (vel_x**2 + vel_y**2)**0.5
+        vel_mag = (vel_x**2 + vel_y**2)**0.5 # velocity magnitude
+
         #self.get_logger().info(f"x: {x}, y: {y}")
 
         # Check if the racecar has crossed the finish line
         distance_from_start = ((x - self.starting_x)**2 + (y - self.starting_y)**2)**0.5
         
+        #check to see if car is at starting circle (not line technically)
         self.on_line = distance_from_start <= self.finish_line_radius
+
         #see if car left finish circle
         if (self.start == True) and (vel_mag > 0):             
             self.get_logger().info("Timer started")
             self.lap_time = self.get_clock().now().nanoseconds
             self.start = False
+
         #check if car crossed finish line, not during start state
+        # todo: clean this logic up
         elif not(self.previous_step_on_line) and self.on_line and not(self.start):
-            
+            # add to lap count
             self.lap_count += 1
             self.lap_time = self.get_clock().now().nanoseconds - self.lap_time
             self.lap_times.append(self.lap_time)
             self.get_logger().info(f"Laps completed: {self.lap_count}, Lap Time: {self.ns_2_s(self.lap_time)}")
             self.lap_time = self.get_clock().now().nanoseconds
 
+        # t-1 status of car on line or not
         self.previous_step_on_line = self.on_line
     def ns_2_s(self, ns):
         #nanoseconds to seconds
