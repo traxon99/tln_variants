@@ -19,12 +19,8 @@ class FtgNode(Node):
         super().__init__('ftg_opp_node')
         self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/opp_drive', 10)
         self.scan_subscription = self.create_subscription(LaserScan, '/opp_scan', self.scan_callback, 10)
-        #self.odom_subscription = self.create_subscription(Odometry, 'odom', self.odom_callback, 10)
         self.get_logger().info('Opponent FTGNode has been started.')
 
-        # from RileyFTG
-        self.car_width = .296
-        self.tolerance = 0.5
 
         #adapted parameters from BDEvan5 f1tenth benchmarks FTG implementation
         self.bubble_radius = 320
