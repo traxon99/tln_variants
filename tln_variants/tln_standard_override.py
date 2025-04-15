@@ -1,3 +1,7 @@
+# TODO: clean up and comment better
+# FYI this script does not work as intended.
+
+
 import rclpy
 import numpy as np
 import time

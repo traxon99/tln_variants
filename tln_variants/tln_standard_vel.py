@@ -77,13 +77,6 @@ class TLNStandard(Node):
         
         self.speed_queue.append(speed)
 
-        # if self.detect_crash():
-        #     self.get_logger().info("Crash")
-        #     self.publish_ackermann_drive(0,0)
-        #     self.destroy_node()
-        #     rclpy.shutdown()
-        #     quit()
-
         self.publish_ackermann_drive(speed, steer)
 
     def publish_ackermann_drive(self, speed, steering_angle):
@@ -99,7 +92,7 @@ class TLNStandard(Node):
     def odom_callback(self, msg):
         vel_x = msg.twist.twist.linear.x
         vel_y = msg.twist.twist.linear.y
-        self.velocity = (vel_x**2 + vel_y**2)**0.5
+        self.velocity = (vel_x**2 + vel_y**2)**0.5 #velocity magnitude
         self.velocity = np.reshape(self.velocity, (1, 1))
 
     def detect_crash(self):
@@ -111,6 +104,8 @@ class TLNStandard(Node):
         if len(self.speed_queue) == self.speed_queue.maxlen and all(speed < 0.05 for speed in self.speed_queue):
             return True
         return False
+    
+    
     def print_avg_speed(self):
         avg = np.average(self.speed_vals)
         print(f"Average: {avg}")

@@ -4,6 +4,8 @@ from sensor_msgs.msg import Joy
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import Header
 
+
+#Const params
 MAX_JOYSTICK = 32767
 MAX_STEER = 0.52
 
@@ -13,7 +15,7 @@ class JoyNode(Node):
         super().__init__('joy_node')
         self.min_speed = 2
         self.max_speed = 15
-        self.turbo = 20
+
         self.joy_subscription = self.create_subscription(
             Joy,
             'joy',
@@ -29,9 +31,11 @@ class JoyNode(Node):
 
     def joy_callback(self, msg: Joy):
 
-        #get values [0,1] from joysticks
+        #get values [0,1] from joysticks (raw)
         left_js_up_down = msg.axes[1] #/ MAX_JOYSTICK
         right_js_left_right = msg.axes[3] #/ MAX_JOYSTICK
+
+        #convert to speed/steering angle
         speed = left_js_up_down * self.max_speed #+ 3
         steering_angle = right_js_left_right * MAX_STEER * 0.7
                 
