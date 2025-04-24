@@ -53,16 +53,33 @@ model_files = [
     './Models/'+model_name+'_noquantized.tflite',
     './Models/'+model_name+'_int8.tflite'
 ]
+# Max Data dataset
+
 dataset_path = [
-   './dataset/5_min_0ms_min.csv',
-   './dataset/5_min_no_crash.csv',
+    './dataset/5_min_0ms_min.csv',
+    './dataset/5_min_no_crash.csv',
+    './dataset/5laps-decent.csv',
     './dataset/aus_good_2.csv',
     './dataset/aus_good_3.csv',
+    './dataset/extra_driving.csv',
+    './dataset/ftg.csv',
+    './dataset/good_clk.csv',
+    './dataset/good_countclk.csv',
+    './dataset/more_good_driving.csv',
+    './dataset/mostly_const_speed.csv',
+    './dataset/rounded_turn_agg.csv',
+    './dataset/rounded_turn_faster.csv',
+    './dataset/rounded_turn_good_2.csv',
+    './dataset/rounded_turn_good.csv',
+    './dataset/rounded_turn_med.csv',
     './dataset/sharp_corner_one.csv',
     './dataset/sharp_corner_two.csv',
-    './dataset/recording-2:1:59.csv',
-    './dataset/recording-2:13:20.csv'
+    './dataset/turn_good.csv',
+    './dataset/turn_low_speed.csv',
+    './dataset/good_countclk.csv',
+    './dataset/good_clk.csv'
 ]
+
 loss_figure_path = './Figures/loss_curve.png'
 down_sample_param = 2 # Down-sample Lidar data
 lr = 5e-5
@@ -133,6 +150,7 @@ vel_data = vel_data.reshape(-1, 1).squeeze()
 shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
 shuffled_lidar_data = shuffle(lidar_data, random_state=62)
 shuffled_velocity_data = shuffle(vel_data, random_state=62)
+
 
 # Split data into train and test sets
 train_ratio = 0.85

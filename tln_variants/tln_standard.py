@@ -20,7 +20,7 @@ class TLNStandard(Node):
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.get_logger().info('TLNNode has been started.')
 
-        self.model_path = "src/tln_variants/models/f1_tenth_model_small_noquantized.tflite"
+        self.model_path = "src/tln_variants/models/TLN_standard_maxdata_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
@@ -44,7 +44,7 @@ class TLNStandard(Node):
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges)
-        scans = np.append(scans, [20])
+        # scans = np.append(scans, [20])
         self.get_logger().info(f'num scans:{len(scans)}')
         noise = np.random.normal(0, 0.5, scans.shape)
         scans = scans + noise
@@ -64,8 +64,8 @@ class TLNStandard(Node):
         steer = output[0, 0]
         speed = output[0, 1]
 
-        min_speed = 0
-        max_speed = 10
+        min_speed = 1
+        max_speed = 13
         speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
         self.speed_vals = np.append(self.speed_vals, speed)
         

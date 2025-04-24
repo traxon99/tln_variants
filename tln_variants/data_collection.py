@@ -68,7 +68,7 @@ class DataCollection(Node):
 
         #Message sync for data recording
 
-        ts = message_filters.ApproximateTimeSynchronizer(subscription_list, 10, 0.0005) # 90 ms
+        ts = message_filters.ApproximateTimeSynchronizer(subscription_list, 10, 0.01) # 90 ms
 
         self.get_logger().warn(f'Data recording Node Initialized.')
 

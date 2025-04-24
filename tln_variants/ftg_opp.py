@@ -124,8 +124,8 @@ class FtgNode(Node):
         ackermann_msg = AckermannDriveStamped()
         ackermann_msg.header = Header()
         ackermann_msg.header.stamp = self.get_clock().now().to_msg()
-        ackermann_msg.drive.speed = float(speed)
-        ackermann_msg.drive.steering_angle = float(steering_angle)
+        ackermann_msg.drive.speed = float(0)#float(speed)
+        ackermann_msg.drive.steering_angle = float(0)#float(steering_angle)
 
         self.ackermann_publisher.publish(ackermann_msg)
         self.get_logger().info(f'Published AckermannDriveStamped message: speed={speed}, steering_angle={steering_angle}')
@@ -138,6 +138,7 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard Interrupt (SIGINT)')
     finally:
+        node.publish_ackermann_drive(0,0)
         node.destroy_node()
         rclpy.shutdown()
 

@@ -131,7 +131,9 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard Interrupt (SIGINT)')
+        node.publish_ackermann_drive(0,0)
     finally:
+        node.publish_ackermann_drive(0,0)
         node.destroy_node()
         rclpy.shutdown()
 

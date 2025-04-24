@@ -50,11 +50,28 @@ model_files = [
     './Models/'+model_name+'_int8.tflite'
 ]
 dataset_path = [
-    './dataset/5_min_0ms_min.csv'
-    # './dataset/aus_good_2.csv',
-    # './dataset/aus_good_3.csv',
-    # './dataset/sharp_corner_one.csv',
-    # './dataset/sharp_corner_two.csv',
+    './dataset/5_min_0ms_min.csv',
+    './dataset/5_min_no_crash.csv',
+    './dataset/5laps-decent.csv',
+    './dataset/aus_good_2.csv',
+    './dataset/aus_good_3.csv',
+    './dataset/extra_driving.csv',
+    './dataset/ftg.csv',
+    './dataset/good_clk.csv',
+    './dataset/good_countclk.csv',
+    './dataset/more_good_driving.csv',
+    './dataset/mostly_const_speed.csv',
+    './dataset/rounded_turn_agg.csv',
+    './dataset/rounded_turn_faster.csv',
+    './dataset/rounded_turn_good_2.csv',
+    './dataset/rounded_turn_good.csv',
+    './dataset/rounded_turn_med.csv',
+    './dataset/sharp_corner_one.csv',
+    './dataset/sharp_corner_two.csv',
+    './dataset/turn_good.csv',
+    './dataset/turn_low_speed.csv',
+    './dataset/good_countclk.csv',
+    './dataset/good_clk.csv'
 ]
 loss_figure_path = './Figures/loss_curve.png'
 down_sample_param = 2 # Down-sample Lidar data
@@ -254,7 +271,7 @@ print(f"Servo Test Loss: {servo_test_loss}")
 # Save non-quantized model
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
 tflite_model = converter.convert()
-tflite_model_path = './Models/' + model_name + "_noquantized.tflite"
+tflite_model_path = './Models/' + model_name + "_standard_noquantized.tflite"
 with open(tflite_model_path, 'wb') as f:
     f.write(tflite_model)
     print(f"{model_name}_noquantized.tflite is saved.")
@@ -273,7 +290,7 @@ converter.representative_dataset = representative_data_gen
 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
 quantized_tflite_model = converter.convert()
 
-tflite_model_path = './Models/' + model_name + "_int8.tflite"
+tflite_model_path = './Models/' + model_name + "_standard_int8.tflite"
 with open(tflite_model_path, 'wb') as f:
     f.write(quantized_tflite_model)
     print(f"{model_name}_int8.tflite is saved.")
