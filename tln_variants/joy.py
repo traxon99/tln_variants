@@ -14,7 +14,7 @@ class JoyNode(Node):
     def __init__(self):
         super().__init__('joy_node')
         self.min_speed = 2
-        self.max_speed = 15
+        self.max_speed = 9
 
         self.joy_subscription = self.create_subscription(
             Joy,

@@ -1,0 +1,36 @@
+rosbag2_bagfile_information:
+  compression_format: ''
+  compression_mode: ''
+  custom_data: null
+  duration:
+    nanoseconds: 48669224501
+  files:
+  - duration:
+      nanoseconds: 48669224501
+    message_count: 3682
+    path: f4.db3
+    starting_time:
+      nanoseconds_since_epoch: 1662636905332057237
+  message_count: 3682
+  relative_file_paths:
+  - f4.db3
+  ros_distro: rosbags
+  starting_time:
+    nanoseconds_since_epoch: 1662636905332057237
+  storage_identifier: sqlite3
+  topics_with_message_count:
+  - message_count: 1841
+    topic_metadata:
+      name: Ackermann
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: ackermann_msgs/msg/AckermannDriveStamped
+      type_description_hash: RIHS01_48ca7612a08d3bb72744fd98b71b7cf2ea24c6ad50fa4e1aa0bbad963c90d8cf
+  - message_count: 1841
+    topic_metadata:
+      name: Lidar
+      offered_qos_profiles: ''
+      serialization_format: cdr
+      type: sensor_msgs/msg/LaserScan
+      type_description_hash: RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+  version: 8

@@ -28,7 +28,11 @@ setup(
             'joy_node_drive = tln_variants.joy:main',
             'joy_test = tln_variants.joy_test:main',
             'tln_override = tln_variants.tln_standard_override:main',
-            'tln_vel = tln_variants.tln_standard_vel:main'
+            'tln_vel = tln_variants.tln_standard_vel:main',
+            'rln = tln_variants.rln:main',
+            'rln_collect = tln_variants.rnn_data_collection:main',
+            'rln_no_ts = tln_variants.rln_no_ts:main',
+            'rln_sim = tln_variants.rln_sim:main'
         ],
     },
 )

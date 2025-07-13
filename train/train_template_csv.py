@@ -14,8 +14,6 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.losses import huber
 from tensorflow.keras.optimizers import Adam
 
-# Check GPU availability - You don't need a gpu to train this model
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 gpu_available = tf.test.is_gpu_available()
 print('GPU AVAILABLE:', gpu_available)
 

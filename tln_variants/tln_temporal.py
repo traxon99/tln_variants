@@ -20,7 +20,7 @@ class TLNStandard(Node):
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
 
         # Load TFLite model
-        self.model_path = "src/tln_variants/models/TLN_temporal_max_data_noquantized.tflite"
+        self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/f1_tenth_model_temporal_M_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]

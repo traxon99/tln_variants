@@ -131,9 +131,9 @@ lidar_data = np.array(lidar_data)
 servo_data = np.array(servo_data)
 speed_data = np.array(speed_data)
 
-# Shuffle data
-shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
-shuffled_lidar_data = shuffle(lidar_data, random_state=62)
+# # Shuffle data
+# shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
+# shuffled_lidar_data = shuffle(lidar_data, random_state=62)
 
 # Split data into train and test sets
 train_ratio = 0.85
