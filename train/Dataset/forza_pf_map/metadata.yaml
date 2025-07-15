@@ -1,0 +1,32 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  duration:
+    nanoseconds: 85975237781
+  starting_time:
+    nanoseconds_since_epoch: 1752618753412961726
+  message_count: 6879
+  topics_with_message_count:
+    - topic_metadata:
+        name: drive
+        type: ackermann_msgs/msg/AckermannDriveStamped
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 3439
+    - topic_metadata:
+        name: scan
+        type: sensor_msgs/msg/LaserScan
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 3440
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - forza_pf_map_0.db3
+  files:
+    - path: forza_pf_map_0.db3
+      starting_time:
+        nanoseconds_since_epoch: 1752618753412961726
+      duration:
+        nanoseconds: 85975237781
+      message_count: 6879

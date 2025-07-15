@@ -8,7 +8,7 @@ from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-
+import sys
 # from vesc_msgs.msg import VescImuStamped   # ① import real type
 
 
@@ -17,9 +17,9 @@ class DataCollectionNode(Node):
 
     STOP_AFTER_SEC = 5 * 60 #time in sec 
 
-    def __init__(self):
+    def __init__(self, name):
         super().__init__('sim_data_collector')
-
+        self.file_name = name
         #Time flag 
         self.start_time = self.get_clock().now()
         self.recording_active = True
@@ -57,7 +57,8 @@ class DataCollectionNode(Node):
         self.ts = message_filters.ApproximateTimeSynchronizer(
             #[self.odom_sub, self.odom_pf_sub, self.lidar_sub, self.position_sub, self.imu_sub],
             #[self.odom_sub, self.lidar_sub, self.position_sub, self.imu_sub],
-            [self.odom_sub, self.lidar_sub, self.ack_sub], #Add ackermann
+            #[self.odom_sub, 
+            [self.lidar_sub, self.ack_sub], #Add ackermann
             queue_size=20, #20
             slop=0.05,
             allow_headerless=True
@@ -71,7 +72,7 @@ class DataCollectionNode(Node):
 
     def init_bag_writer(self):
         storage_options = StorageOptions(
-            uri='src/tln_variants/train/Dataset/5_min_ftg_SPL_map_sim',
+            uri='src/tln_variants/train/Dataset/'+self.file_name,
             storage_id='sqlite3'
         )
         converter_options = ConverterOptions('', '')
@@ -81,7 +82,7 @@ class DataCollectionNode(Node):
         
         # Register topics
         topics = [
-            TopicMetadata(name='odom', type='nav_msgs/msg/Odometry', serialization_format='cdr'),
+            # TopicMetadata(name='odom', type='nav_msgs/msg/Odometry', serialization_format='cdr'),
             TopicMetadata(name='scan', type='sensor_msgs/msg/LaserScan', serialization_format='cdr'),
             TopicMetadata(name='drive', type='ackermann_msgs/msg/AckermannDriveStamped', serialization_format='cdr') # Add Ackermann Drive
             
@@ -95,14 +96,14 @@ class DataCollectionNode(Node):
     #def sensor_callback(self, odom_msg, scan_msg, pose_msg, imu_msg):
 
 
-    def sensor_callback(self, odom_msg,scan_msg, drive_msg):
+    def sensor_callback(self, scan_msg, drive_msg):
         if not self.recording_active:
             return #ignore once stopped
 
         try:
             timestamp = self.get_clock().now().nanoseconds
             
-            self.writer.write('odom', serialize_message(odom_msg), timestamp)
+            # self.writer.write('odom', serialize_message(odom_msg), timestamp)
             self.writer.write('scan', serialize_message(scan_msg), timestamp)
             self.writer.write('drive', serialize_message(drive_msg), timestamp)
 
@@ -136,9 +137,11 @@ class DataCollectionNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    collector = DataCollectionNode()
+    name = str(sys.argv[1])
+    collector = DataCollectionNode(name)
     
     try:
+        
         collector.get_logger().info('Starting data collection...')
         rclpy.spin(collector)
     except KeyboardInterrupt:
