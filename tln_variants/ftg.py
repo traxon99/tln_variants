@@ -11,8 +11,8 @@ import numpy as np
 class FtgNode(Node):
     def __init__(self):
         super().__init__('ftg_node')
-        self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
-        self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/opp_drive', 10)
+        self.scan_subscription = self.create_subscription(LaserScan, '/opp_scan', self.scan_callback, 10)
         self.get_logger().info('Jackson FTGNode has been started.')
 
         #adapted parameters from BDEvan5 f1tenth benchmarks FTG implementation

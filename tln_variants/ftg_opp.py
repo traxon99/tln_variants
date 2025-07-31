@@ -23,16 +23,16 @@ class FtgNode(Node):
 
 
         #adapted parameters from BDEvan5 f1tenth benchmarks FTG implementation
-        self.bubble_radius = 320
+        self.bubble_radius = 330
         self.preprocess_conv_size = 3
         self.best_point_conv_size = 80
         self.max_lidar_dist = 10.0
-        self.fast_speed = 4.0
-        self.straights_speed = 3.5
-        self.corners_speed = 2.0
+        self.fast_speed = 7.0
+        self.straights_speed = 4.5
+        self.corners_speed = 1.5
         self.straights_steering_angle = 0.174 
         self.fast_steering_angle = 0.0785 #0.0785
-        self.safe_threshold = 5
+        self.safe_threshold = 6
         self.max_steer = 0.52 #0.52
 
 
@@ -124,7 +124,7 @@ class FtgNode(Node):
         ackermann_msg = AckermannDriveStamped()
         ackermann_msg.header = Header()
         ackermann_msg.header.stamp = self.get_clock().now().to_msg()
-        ackermann_msg.drive.speed = float(0)#float(speed)
+        ackermann_msg.drive.speed = float(speed)#float(speed)
         ackermann_msg.drive.steering_angle = float(0)#float(steering_angle)
 
         self.ackermann_publisher.publish(ackermann_msg)

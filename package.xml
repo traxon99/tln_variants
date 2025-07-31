@@ -6,7 +6,10 @@
   <description>TODO: Package description</description>
   <maintainer email="jackson@todo.todo">jackson</maintainer>
   <license>TODO: License declaration</license>
-
+  
+  
+  <depend>sick_scan_xd</depend>
+  
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

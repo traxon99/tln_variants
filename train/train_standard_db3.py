@@ -34,12 +34,12 @@ def read_ros2_bag(bag_path):
         topic, serialized_msg, t_ns = reader.read_next()
         t = t_ns * 1e-9
 
-        if topic == 'scan':
+        if topic == 'scan' or topic == 'Lidar':
             msg = deserialize_message(serialized_msg, LaserScan)
             cleaned = np.nan_to_num(msg.ranges, posinf=0.0, neginf=0.0)
             lidar_data.append(cleaned[::2])
             timestamps.append(t)
-        elif topic == 'drive':
+        elif topic == 'drive' or topic == 'Ackermann':
             msg = deserialize_message(serialized_msg, AckermannDriveStamped)
             servo_data.append(msg.drive.steering_angle)
             speed_data.append(msg.drive.speed)
@@ -55,6 +55,7 @@ def read_ros2_bag(bag_path):
         np.array(timestamps)
     )
 
+
 #========================================================
 # Main
 #========================================================
@@ -63,9 +64,25 @@ if __name__ == '__main__':
 
     # Parameters
     bag_paths = [
-        'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
-        'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
-        'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+        # 'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+        # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+        # # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/forza_pf_map/forza_pf_map_0.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP/Forza_GLC_smile_PP_0.db3', #evil
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_glc_ot_ez_3laps/Forza_glc_ot_ez_3laps_0.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_small_3laps/Forza_GLC_smile_small_3laps_0.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_hangar_1905_v0_1lap/Forza_hangar_1905_v0_1lap_0.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map/test_map.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_opp/test_map_opp.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
     ]
     batch_size = 64
     lr = 5e-5

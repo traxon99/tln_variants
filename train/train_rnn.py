@@ -154,6 +154,8 @@ def build_spatiotemporal_model(seq_len, num_ranges):
     v = Dense(64)(lstm_out)
     attn = Attention()([q, v, k])
     context = tf.keras.layers.Lambda(lambda x: tf.reduce_mean(x, axis=1))(attn)
+    # context = tf.keras.layers.GlobalAveragePooling1D()(attn)
+    # context = tf.keras.layers.GlobalMaxPooling1D()(attn)
     out = Dense(2, activation='tanh', name='controls')(context)
     return Model(inp, out, name='RNN_Attention_Controller')
 
@@ -183,10 +185,10 @@ if __name__ == '__main__':
     # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
     ]
 
-    seq_len    = 2
-    batch_size = 64
-    lr         = 5e-5
-    epochs     = 20
+    seq_len    = 5
+    batch_size = 128
+    lr         = 1e-5
+    epochs     = 30
 
     # --- Load & concatenate all bags ---
     all_lidar, all_servo, all_speed, all_ts = [], [], [], []

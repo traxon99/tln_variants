@@ -19,34 +19,26 @@ class TLNStandard(Node):
         self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.get_logger().info('TLNNode has been started.')
-        
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_sim_data_aus_mos_spl.tflite"
-        self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_M_noquantized.tflite"
-        
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_M_noquantized.tflite"
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_sim_data_aus_mos_spl.tflite" # good
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_Forza.tflite"
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/Forza_GLC_smile_ot_ez.tflite" # almost good
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLNETH_with_edgecases.tflite"
+        # self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/very_close.tflite"
+        self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/lidar_imitation_model_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
         self.output_index = self.interpreter.get_output_details()[0]["index"]
         self.scan_buffer = np.zeros((2, 20))
 
-        # Evaluation additions
-        self.scan = []
-        self.window_size = 10
-        # Initialize a deque with a maximum length of 10 to store speed values
-        self.speed_queue = deque(maxlen=10)
-
-        self.position = None
-        self.orientation = None
-        
-        #for evaluation
-        self.speed_vals = np.array([])
-
     def linear_map(self, x, x_min, x_max, y_min, y_max):
         return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges)
-        scans = np.append(scans, [20])
+        # scans -= 0.25
+        # scans = np.append(scans, [20])
         self.get_logger().info(f'num scans:{len(scans)}')
         noise = np.random.normal(0, 0.5, scans.shape)
         scans = scans + noise
@@ -69,16 +61,6 @@ class TLNStandard(Node):
         min_speed = -0.5
         max_speed = 9
         speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
-        self.speed_vals = np.append(self.speed_vals, speed)
-        
-        self.speed_queue.append(speed)
-
-        if self.detect_crash():
-            self.get_logger().info("Crash")
-            self.publish_ackermann_drive(0,0)
-            self.destroy_node()
-            rclpy.shutdown()
-            quit()
 
         self.publish_ackermann_drive(speed, steer)
 
@@ -97,18 +79,6 @@ class TLNStandard(Node):
         self.position = msg.pose.pose.position
         self.orientation = msg.pose.pose.orientation
 
-    def detect_crash(self):
-        for i in range(len(self.scan) - self.window_size + 1):
-            window = self.scan[i:i + self.window_size]
-            if all(val <= 0.2 for val in window):
-                return True
-
-        if len(self.speed_queue) == self.speed_queue.maxlen and all(speed < 0.05 for speed in self.speed_queue):
-            return True
-        return False
-    def print_avg_speed(self):
-        avg = np.average(self.speed_vals)
-        print(f"Average: {avg}")
 
 def main(args=None):
 
@@ -120,7 +90,6 @@ def main(args=None):
         node.get_logger().info('Keyboard Interrupt (SIGINT)')
     finally:
         node.publish_ackermann_drive(0,0)
-        node.print_avg_speed()
         node.destroy_node()
         rclpy.shutdown()
 

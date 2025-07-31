@@ -6,7 +6,7 @@ from sensor_msgs.msg import LaserScan
 #for graphing
 import numpy as np
 import matplotlib.pyplot as plt
-
+import matplotlib.axes as ax
 #for progress tracking
 import csv
 #
@@ -25,12 +25,12 @@ class Evaluation(Node):
 
         #load path data from centerline csv file
         # self.path_data = np.loadtxt(f'{os.getcwd()}{map_name}_centerline.csv', delimiter=',', usecols=(0, 1))
-        self.path_data = np.loadtxt('/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Spielberg_centerline.csv', delimiter=',', usecols=(0, 1))
+        self.path_data = np.loadtxt('/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Austin_centerline.csv', delimiter=',', usecols=(0, 1))
         
         #starting point parameters
         self.starting_x = 0     # GYM -52
         self.starting_y = 0      # 0
-        self.finish_line_radius = 1
+        self.finish_line_radius = 2
         # self.max_laps = 5
         self.CRASH_THRESHOLD = 0.15
 
@@ -135,9 +135,13 @@ class Evaluation(Node):
     
     def wrap_up(self):
         #Evaluation needs to be ceased. All times and data needs to be saved and the node shut down
-        print(self.lap_times)
-
-        plt.plot(self.progresses, self.speeds)
+        print(f"Lap times:\t{self.lap_times}\n"
+              f"Average time:\t{np.mean(self.lap_times)}\n"
+              f"Average speed:\t{np.mean(self.speeds)}")
+        fig, ax = plt.subplots()
+        ax.axes.set_ylim(0.0,10.0)
+        ax.axes.set_xlim(0.0,1.0)
+        plt.plot(self.progresses, self.speeds,)
         plt.xlabel("Track Progress")
         plt.ylabel("Speed")
         plt.title(f"{self.name}: Speed vs. Track Progress on {self.map_name}")
@@ -164,7 +168,7 @@ class Evaluation(Node):
         self.relative_progress = (1 - self.starting_progress) + self.absolute_progress
         if self.relative_progress >= 1:
             self.relative_progress -= 1
-        print(f"Progress: {self.relative_progress:.0%}")
+        print(f"Lap: {self.lap_count}\tProgress: {self.relative_progress:.0%}")
         # if round(self.relative_progress, 3) % 0.25 == 0:
             # print(round(self.relative_progress, 2))
 
