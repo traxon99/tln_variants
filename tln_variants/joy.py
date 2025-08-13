@@ -14,7 +14,7 @@ class JoyNode(Node):
     def __init__(self):
         super().__init__('joy_node')
         self.min_speed = 2
-        self.max_speed = 9
+        self.max_speed = 4
 
         self.joy_subscription = self.create_subscription(
             Joy,
@@ -33,11 +33,11 @@ class JoyNode(Node):
 
         #get values [0,1] from joysticks (raw)
         left_js_up_down = msg.axes[1] #/ MAX_JOYSTICK
-        right_js_left_right = msg.axes[3] #/ MAX_JOYSTICK
+        right_js_left_right = msg.axes[2] #/ MAX_JOYSTICK
 
         #convert to speed/steering angle
         speed = left_js_up_down * self.max_speed #+ 3
-        steering_angle = right_js_left_right * MAX_STEER * 0.7
+        steering_angle = right_js_left_right * MAX_STEER
                 
         self.publish_ackermann_drive(speed, steering_angle)
 

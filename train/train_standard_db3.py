@@ -61,32 +61,107 @@ def read_ros2_bag(bag_path):
 #========================================================
 if __name__ == '__main__':
     print('GPU AVAILABLE:', bool(tf.config.list_physical_devices('GPU')))
+    #"Good" model
 
-    # Parameters
+    # # Bag path for decent model
+    # bag_paths = [
+    #     # 'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+    #     # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+    #     # # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/forza_pf_map/forza_pf_map_0.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP/Forza_GLC_smile_PP_0.db3', #evil
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_glc_ot_ez_3laps/Forza_glc_ot_ez_3laps_0.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_small_3laps/Forza_GLC_smile_small_3laps_0.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_hangar_1905_v0_1lap/Forza_hangar_1905_v0_1lap_0.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map/test_map.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_opp/test_map_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
+    # ]
+
+    #Everything
+
+    # bag_paths = [
+    #     'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_1lap/JFRv5_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_edgecases/JFRv5_edgecases.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_obstacle_overtake/JFRv5_obstacle_overtake.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Test_map_1lap/Test_map_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3',
+    #             # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+    #     # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/forza_pf_map/forza_pf_map_0.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP/Forza_GLC_smile_PP_0.db3', #evil
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_glc_ot_ez_3laps/Forza_glc_ot_ez_3laps_0.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_small_3laps/Forza_GLC_smile_small_3laps_0.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_hangar_1905_v0_1lap/Forza_hangar_1905_v0_1lap_0.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map/test_map.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_opp/test_map_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
+    # ]
+
+    #GOLDENIsh
     bag_paths = [
-        # 'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
-        # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
-        # # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/forza_pf_map/forza_pf_map_0.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP/Forza_GLC_smile_PP_0.db3', #evil
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
         '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_glc_ot_ez_3laps/Forza_glc_ot_ez_3laps_0.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_small_3laps/Forza_GLC_smile_small_3laps_0.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_hangar_1905_v0_1lap/Forza_hangar_1905_v0_1lap_0.db3',
         '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
         '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map/test_map.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_opp/test_map_opp.db3',
         '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
         '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
-        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_nonobstr_edited/JFRv6_nonobstr_edited.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv5_nonobstr_edited/JFRv5_nonobstr_edited.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
+        
+
     ]
+    
+    # #CLose, but slow
+    # bag_paths = [
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_1lap/JFRv5_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_edgecases/JFRv5_edgecases.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_obstacle_overtake/JFRv5_obstacle_overtake.db3'
+    # ]
+    
+    
+    # # Slow
+    # bag_paths = [
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv5_nonobstr_edited/JFRv5_nonobstr_edited.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_edited/JFRv6_edited.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_nonobstr_edited/JFRv6_nonobstr_edited.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_obstr_edited/JFRv6_obstr_edited.db3',
+    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5_1lap/JFRv5_1lap.db3'
+    # ] 
+
+
     batch_size = 64
     lr = 5e-5
-    num_epochs = 20
+    num_epochs = 30
     model_name = 'lidar_imitation_model'
     loss_figure_path = f'./Models/{model_name}_loss.png'
 
@@ -98,8 +173,17 @@ if __name__ == '__main__':
         all_servo.extend(s)
         all_speed.extend(sp)
         all_ts.extend(ts)
+    
+    lidar = np.array(all_lidar)#[:-1]
 
-    lidar = np.array(all_lidar)
+    #add noise
+    noise = np.random.normal(0,0.15,lidar.shape)   
+    print(noise[1])
+    
+    print(noise.shape)
+
+    lidar = lidar + noise
+    
     servo = np.array(all_servo)
     speed = np.array(all_speed)
 
