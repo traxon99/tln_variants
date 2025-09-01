@@ -1,2 +1,4 @@
-/home/jackson/sim_ws/src/tln_variants/train/Dataset/**
-/home/jackson/sim_ws/src/tln_variants/results/TLN_Forza_New/**
+train/Dataset/**
+results/**
+train/Figures/loss_curve.png
+train/Models/lidar_imitation_model_loss.png
