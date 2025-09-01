@@ -34,7 +34,8 @@ class AutonomousNode(Node):
             # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RNN_15min_sim.tflite'
             # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_with_TLN_data.tflite'
             # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_TLN_M.tflite'
-            model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_GMP.tflite'
+            # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_GMP.tflite'
+            model_path='/home/jackson/sim_ws/src/tln_variants/train/Models/test.tflite'
             # Check if model file exists
             if not os.path.exists(model_path):
                 self.get_logger().error(f'Model file not found: {model_path}')

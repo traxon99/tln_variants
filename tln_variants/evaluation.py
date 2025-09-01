@@ -25,7 +25,7 @@ class Evaluation(Node):
 
         #load path data from centerline csv file
         # self.path_data = np.loadtxt(f'{os.getcwd()}{map_name}_centerline.csv', delimiter=',', usecols=(0, 1))
-        self.path_data = np.loadtxt('/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Austin_centerline.csv', delimiter=',', usecols=(0, 1))
+        self.path_data = np.loadtxt('/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Spielberg_centerline.csv', delimiter=',', usecols=(0, 1))
         
         #starting point parameters
         self.starting_x = 0     # GYM -52

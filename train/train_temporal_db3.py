@@ -1,428 +1,325 @@
+#!/usr/bin/env python3
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # If you want utilize GPU, uncomment this line
-from sklearn.utils import shuffle
-import csv
 import time
+import csv
 import subprocess
 import numpy as np
 import tensorflow as tf
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Flatten, Dense, Conv1D, BatchNormalization, TimeDistributed, LSTM, Reshape
-from tensorflow.keras.losses import huber
-from tensorflow.keras.optimizers import Adam
 
+from sklearn.utils import shuffle
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import (BatchNormalization, TimeDistributed, Conv1D,
+                                     MaxPooling1D, Flatten, LSTM, Dense, Dropout)
+from tensorflow.keras.optimizers import Adam
 
 from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
 from rclpy.serialization import deserialize_message
 from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
-from nav_msgs.msg import Odometry
+# from nav_msgs.msg import Odometry  # optional
 
-# Check GPU availability - You don't need a gpu to train this model
+# ========================================================
+# Config / Reproducibility
+# ========================================================
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+# Uncomment to force CPU:
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-gpu_available = tf.test.is_gpu_available()
+
+gpu_available = len(tf.config.list_physical_devices('GPU')) > 0
 print('GPU AVAILABLE:', gpu_available)
 
-#========================================================
-# Functions
-#========================================================
-#Linear maping
-def linear_map(x, x_min, x_max, y_min, y_max):
-    """Linear mapping function."""
-    return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
+# Folders
+MODEL_DIR = "./Models"
+FIG_DIR = "./Figures"
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(FIG_DIR, exist_ok=True)
 
-#Huber Loss
-def huber_loss(y_true, y_pred, delta=1.0):
+# Training params
+MODEL_NAME = "TLN_temporal_compact"
+LOSS_FIG_PATH = os.path.join(FIG_DIR, "loss_curve.png")
+LR = 5e-5
+BATCH_SIZE = 64
+EPOCHS = 20
+HZ = 40               # used only by (optional) TFLite eval
+DOWNSAMPLE = 2        # lidar downsample factor
+# temporal indices: now, ~1.55s, ~3.1s ago at 40 Hz
+# (t, t-62, t-125). We’ll build forward indices to keep code simple: (i, i+62, i+125)
+OFFSET1 = 62
+OFFSET2 = 125
+
+# ========================================================
+# Utils
+# ========================================================
+def linear_map(x, x_min, x_max, y_min, y_max):
+    """Linear mapping with safe handling when x_min==x_max."""
+    denom = (x_max - x_min)
+    if denom == 0:
+        return np.full_like(x, (y_min + y_max) / 2.0)
+    return (x - x_min) / denom * (y_max - y_min) + y_min
+
+def huber_loss_np(y_true, y_pred, delta=1.0):
     error = np.abs(y_true - y_pred)
     loss = np.where(error <= delta, 0.5 * error**2, delta * (error - 0.5 * delta))
-    mean_loss = np.mean(loss)
-    return mean_loss
-#========================================================
-# Global Data
-#========================================================
+    return np.mean(loss)
 
-# Initialize lists for data
-lidar = []
-servo = []
-speed = []
-test_lidar = []
-test_servo = []
-test_speed = []
-model_name = 'TLN'
-model_files = [
-    './Models/'+model_name+'_noquantized.tflite',
-    './Models/'+model_name+'_int8.tflite'
+def read_ros2_bag(bag_path, downsample=2):
+    storage_opts = StorageOptions(uri=bag_path, storage_id='sqlite3')
+    conv_opts = ConverterOptions(input_serialization_format='', output_serialization_format='')
+    reader = SequentialReader()
+    reader.open(storage_opts, conv_opts)
+
+    lidar_data, servo_data, speed_data, timestamps = [], [], [], []
+
+    while reader.has_next():
+        topic, serialized_msg, t_ns = reader.read_next()
+        t = t_ns * 1e-9
+
+        if topic in ('scan', 'Lidar'):
+            msg = deserialize_message(serialized_msg, LaserScan)
+            cleaned = np.nan_to_num(np.array(msg.ranges, dtype=np.float32),
+                                    posinf=0.0, neginf=0.0)
+            if downsample and downsample > 1:
+                cleaned = cleaned[::downsample]
+            lidar_data.append(cleaned)
+            timestamps.append(t)
+        elif topic in ('drive', 'Ackermann'):
+            msg = deserialize_message(serialized_msg, AckermannDriveStamped)
+            servo_data.append(float(msg.drive.steering_angle))
+            speed_data.append(float(msg.drive.speed))
+        # elif topic == 'odom':
+        #     msg = deserialize_message(serialized_msg, Odometry)
+        #     servo_data.append(float(msg.twist.twist.angular.z))
+        #     speed_data.append(float(msg.twist.twist.linear.x))
+
+    return np.array(lidar_data, dtype=np.float32), \
+           np.array(servo_data, dtype=np.float32), \
+           np.array(speed_data, dtype=np.float32), \
+           np.array(timestamps, dtype=np.float64)
+
+# If scans can vary in length, pad/trim them to a fixed size:
+# def pad_or_trim(arrs, target_len):
+#     out = []
+#     for a in arrs:
+#         if len(a) >= target_len:
+#             out.append(a[:target_len])
+#         else:
+#             pad = np.zeros(target_len, dtype=a.dtype)
+#             pad[:len(a)] = a
+#             out.append(pad)
+#     return np.stack(out, axis=0)
+
+def build_temporal_triplets(x_seq, y_seq, offsets=(OFFSET1, OFFSET2)):
+    """
+    Build sequences of shape (N', 3, L) aligned to y at t (current frame).
+    We construct [x[i], x[i+o1], x[i+o2]] and target y[i+o2] so inputs and targets align.
+    """
+    o1, o2 = offsets
+    N = len(x_seq)
+    max_i = N - o2
+    X_triplets = []
+    y_aligned = []
+    for i in range(max_i):
+        X_triplets.append([x_seq[i], x_seq[i+o1], x_seq[i+o2]])
+        y_aligned.append(y_seq[i+o2])
+    X_triplets = np.array(X_triplets, dtype=np.float32)     # (N', 3, L)
+    y_aligned = np.array(y_aligned, dtype=np.float32)       # (N', 2)
+    # add channel dim for Conv1D: (N', 3, L, 1)
+    X_triplets = np.expand_dims(X_triplets, axis=-1)
+    return X_triplets, y_aligned
+
+# ========================================================
+# Load Dataset (bags)
+# ========================================================
+bag_paths = [
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_nonobstr_edited/JFRv6_nonobstr_edited.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv5_nonobstr_edited/JFRv5_nonobstr_edited.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
 ]
-dataset_path = [
-    './dataset/5_min_0ms_min.csv',
-    './dataset/5_min_no_crash.csv',
-    './dataset/5laps-decent.csv',
-    './dataset/aus_good_2.csv',
-    './dataset/aus_good_3.csv',
-    './dataset/extra_driving.csv',
-    './dataset/ftg.csv',
-    './dataset/good_clk.csv',
-    './dataset/good_countclk.csv',
-    './dataset/more_good_driving.csv',
-    './dataset/mostly_const_speed.csv',
-    './dataset/rounded_turn_agg.csv',
-    './dataset/rounded_turn_faster.csv',
-    './dataset/rounded_turn_good_2.csv',
-    './dataset/rounded_turn_good.csv',
-    './dataset/rounded_turn_med.csv',
-    './dataset/sharp_corner_one.csv',
-    './dataset/sharp_corner_two.csv',
-    './dataset/turn_good.csv',
-    './dataset/turn_low_speed.csv',
-    './dataset/good_countclk.csv',
-    './dataset/good_clk.csv'
-]
-loss_figure_path = './Figures/loss_curve.png'
-down_sample_param = 2 # Down-sample Lidar data
-lr = 5e-5
-loss_function = 'huber'
-batch_size = 64
-num_epochs = 20
-hz = 40
-if not os.path.exists("./Models"):
-    os.mkdir("Models")
-if not os.path.exists("./Figures"):
-    os.mkdir("Figures")
-# Initialize variables for min and max speed
-max_speed = 0
-min_speed = 0
 
-#========================================================
-# Get Dataset
-#========================================================
-lidar_data = []
-servo_data = []
-speed_data = []
+lidar_all, servo_all, speed_all = [], [], []
 
-# Iterate through bag files
-for pth in dataset_path:
-    if not os.path.exists(pth):
-        print(f"dataset doesn't exist in {pth}")
-        exit(0)
-    with open(pth, 'r') as csvfile:
-      csvreader = csv.reader(csvfile, delimiter=',')
+for p in bag_paths:
+    l, s, sp, _ = read_ros2_bag(p, downsample=DOWNSAMPLE)
+    print(f'Loaded {len(l)} scans from {p}')
+    # Basic sanity: ensure we have same length among l/s/sp if they are sampled differently
+    N = min(len(l), len(s), len(sp))
+    if N == 0:
+        continue
+    lidar_all.append(l[:N])
+    servo_all.append(s[:N])
+    speed_all.append(sp[:N])
 
+if not lidar_all:
+    raise RuntimeError("No data loaded. Check bag paths and topics.")
 
-      for row in csvreader:
-        clean_speed = float(row[0])
-        clean_servo = float(row[1])
-        #row 2 is velocity
-        clean_lidar = list(map(float, row[3].translate(str.maketrans("", "", "[]")).split(',')))
-        if clean_speed > max_speed:
-                max_speed = clean_speed
+lidar_all = np.concatenate(lidar_all, axis=0)
+servo_all = np.concatenate(servo_all, axis=0)
+speed_all = np.concatenate(speed_all, axis=0)
 
-        speed_data.append(clean_speed)
-        servo_data.append(clean_servo)
-        lidar_data.append(clean_lidar)
+# ========================================================
+# Shuffle & Split
+# ========================================================
+# Pack labels (servo, speed) together for shuffling in sync
+labels_all = np.stack([servo_all, speed_all], axis=1)  # (N, 2)
 
-print("length of lidar: ", len(lidar_data[0]))
-print(len(speed_data))
-print(len(servo_data))
-print(len(lidar_data))
+L = lidar_all.shape[1]
+print(f'num_lidar_range_values: {L}')
 
-print([len(x) for x in lidar_data if hasattr(x, '__len__')])
-lidar_data = lidar_data[:-1]
-speed_data = speed_data[:-1]
-servo_data = servo_data[:-1]
+lidar_shuf, labels_shuf = shuffle(lidar_all, labels_all, random_state=SEED)
 
-# Convert data to arrays
-lidar_data = np.array(lidar_data)
-servo_data = np.array(servo_data)
-speed_data = np.array(speed_data)
-
-# # Shuffle data
-# shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
-# shuffled_lidar_data = shuffle(lidar_data, random_state=62)
-
-# Split data into train and test sets
 train_ratio = 0.85
-train_samples = int(train_ratio * len(shuffled_lidar_data))
-x_train_bag, x_test_bag = shuffled_lidar_data[:train_samples], shuffled_lidar_data[train_samples:]
+N_total = len(lidar_shuf)
+N_train = int(train_ratio * N_total)
 
-# Extract servo and speed values
-y_train_bag = shuffled_data[:train_samples]
-y_test_bag = shuffled_data[train_samples:]
+x_train_1d = lidar_shuf[:N_train]     # (N_train, L)
+y_train_raw = labels_shuf[:N_train]   # (N_train, 2)
+x_test_1d  = lidar_shuf[N_train:]
+y_test_raw = labels_shuf[N_train:]
 
-# Extend lists with train and test data
-lidar.extend(x_train_bag)
-servo.extend(y_train_bag[:, 0])
-speed.extend(y_train_bag[:, 1])
+# ========================================================
+# Scale speed to [0,1] using training stats only
+# ========================================================
+speed_min = np.min(y_train_raw[:,1])
+speed_max = np.max(y_train_raw[:,1])
+y_train = np.stack([y_train_raw[:,0],
+                    linear_map(y_train_raw[:,1], speed_min, speed_max, 0, 1)], axis=1)
+y_test  = np.stack([y_test_raw[:,0],
+                    linear_map(y_test_raw[:,1], speed_min, speed_max, 0, 1)], axis=1)
 
-test_lidar.extend(x_test_bag)
-test_servo.extend(y_test_bag[:, 0])
-test_speed.extend(y_test_bag[:, 1])
+print(f'Min_speed (train): {speed_min:.4f}')
+print(f'Max_speed (train): {speed_max:.4f}')
+print(f'Train shapes: x={x_train_1d.shape}, y={y_train.shape}')
+print(f'Test  shapes: x={x_test_1d.shape},  y={y_test.shape}')
 
-print(f'\nData in {pth}:')
-print(f'Shape of Train Data --- Lidar: {len(lidar)}, Servo: {len(servo)}, Speed: {len(speed)}')
-print(f'Shape of Test Data --- Lidar: {len(test_lidar)}, Servo: {len(test_servo)}, Speed: {len(test_speed)}')
+# ========================================================
+# Build temporal triplets separately for train and test
+# ========================================================
+X_train, Y_train = build_temporal_triplets(x_train_1d, y_train, offsets=(OFFSET1, OFFSET2))
+X_test,  Y_test  = build_temporal_triplets(x_test_1d,  y_test,  offsets=(OFFSET1, OFFSET2))
 
-# Calculate total number of samples
-total_number_samples = len(lidar)
+print(f'X_train: {X_train.shape} (N, 3, {L}, 1)')
+print(f'Y_train: {Y_train.shape} (N, 2)')
+print(f'X_test : {X_test.shape}')
+print(f'Y_test : {Y_test.shape}')
 
-print(f'Overall Samples = {total_number_samples}')
-lidar = np.asarray(lidar)
-servo = np.asarray(servo)
-speed = np.asarray(speed)
-speed = linear_map(speed, min_speed, max_speed, 0, 1)
-test_lidar = np.asarray(test_lidar)
-test_servo = np.asarray(test_servo)
-test_speed = np.asarray(test_speed)
-test_speed = linear_map(test_speed, min_speed, max_speed, 0, 1)
+# Final input shape for Keras
+input_shape = (3, L, 1)
 
-print(f'Min_speed: {min_speed}')
-print(f'Max_speed: {max_speed}')
-print(f'Loaded {len(lidar)} Training samples ---- {(len(lidar)/total_number_samples)*100:0.2f}% of overall')
-print(f'Loaded {len(test_lidar)} Testing samples ---- {(len(test_lidar)/total_number_samples)*100:0.2f}% of overall\n')
+# ========================================================
+# Model (compact Conv1D + stacked LSTMs with dropout)
+# ========================================================
+model = Sequential(name="tln_temporal_compact")
+model.add(BatchNormalization(input_shape=input_shape))
 
-# Check array shapes
-assert len(lidar) == len(servo) == len(speed)
-assert len(test_lidar) == len(test_servo) == len(test_speed)
+# Spatial feature extractor per frame
+model.add(TimeDistributed(Conv1D(16, kernel_size=5, activation='relu', padding='same')))
+model.add(TimeDistributed(MaxPooling1D(pool_size=2)))
+model.add(TimeDistributed(Conv1D(32, kernel_size=3, activation='relu', padding='same')))
+model.add(TimeDistributed(MaxPooling1D(pool_size=2)))
+model.add(TimeDistributed(Flatten()))
 
-#======================================================
-# Split Dataset
-#======================================================
+# Temporal modeling
+model.add(LSTM(64, return_sequences=True, dropout=0.2, recurrent_dropout=0.2))
+model.add(LSTM(64, return_sequences=True, dropout=0.2, recurrent_dropout=0.2))
+model.add(LSTM(32, dropout=0.2, recurrent_dropout=0.2))
 
-print('Splitting Data into Train/Test')
-train_data = np.concatenate((servo[:, np.newaxis], speed[:, np.newaxis]), axis=1)
-test_data =  np.concatenate((test_servo[:, np.newaxis], test_speed[:, np.newaxis]), axis=1)
-# Check array shapes
-print(f'Train Data(lidar): {lidar.shape}')
-print(f'Train Data(servo, speed): {servo.shape}, {speed.shape}')
-print(f'Test Data(lidar): {test_lidar.shape}')
-print(f'Test Data(servo, speed): {test_servo.shape}, {test_speed.shape}')
+# Regression head (servo, speed)
+model.add(Dense(2, activation='linear'))
 
-#======================================================
-# DNN Arch
-#======================================================
+optimizer = Adam(learning_rate=LR)
+model.compile(optimizer=optimizer, loss='huber')  # same as your setup
+model.summary(print_fn=lambda s: print(s))
 
-num_lidar_range_values = len(lidar[0])
-print(f'num_lidar_range_values: {num_lidar_range_values}')
+# ========================================================
+# Train
+# ========================================================
+t0 = time.time()
+history = model.fit(
+    X_train, Y_train,
+    epochs=EPOCHS,
+    batch_size=BATCH_SIZE,
+    validation_data=(X_test, Y_test),
+    verbose=1
+)
+print(f'=============> {int(time.time() - t0)} seconds <=============')
 
-oldlidar = tf.stack([[i, i, i] for i in lidar])
-oldtest_lidar = tf.stack([[i, i, i] for i in test_lidar])
-newlidar = []
-
-#i, i+62, i+125 represent t, t-5, t-10 
-try:
-    for i in range(len(lidar)-125):
-        newlidar.append([lidar[i], lidar[i+62], lidar[i+125]])
-except:
-    raise ValueError("Wrong timesteps.")
-newlidar = tf.stack(newlidar)
-lidar = newlidar
-test_lidar = newlidar
-
-model = tf.keras.Sequential([
-    tf.keras.layers.BatchNormalization(epsilon=0.001, axis=-1, input_shape=(3, num_lidar_range_values, 1)),
-    tf.keras.layers.TimeDistributed(Conv1D(filters=24, kernel_size=5, strides=2, activation="relu", padding='same')),
-    tf.keras.layers.TimeDistributed(Conv1D(filters=36, kernel_size=5, strides=2, activation="relu", padding='same')),
-    tf.keras.layers.TimeDistributed(Conv1D(filters=48, kernel_size=5, strides=2, activation="relu", padding='same')),
-    tf.keras.layers.TimeDistributed(Conv1D(filters=64, kernel_size=3, strides=1, activation="relu", padding='same')),
-    tf.keras.layers.TimeDistributed(Conv1D(filters=64, kernel_size=3, strides=1, activation="relu", padding='same')),
-    tf.keras.layers.TimeDistributed(Flatten()),
-    tf.keras.layers.LSTM(32, return_sequences=True),
-    tf.keras.layers.LSTM(32, return_sequences=True),
-    tf.keras.layers.LSTM(32, return_sequences=True),
-    tf.keras.layers.LSTM(32),
-    tf.keras.layers.Dense(2)
-    ])
-
-#======================================================
-# Model Compilation
-#======================================================
-
-optimizer = Adam(lr)
-model.compile(optimizer=optimizer, loss=loss_function)
-print(model.summary())
-
-#======================================================
-# Model Fit
-#======================================================
-start_time = time.time()
-ydata = np.concatenate((servo[:, np.newaxis], speed[:, np.newaxis]), axis=1)[125:]
-test_data = ydata
-history = model.fit(lidar, ydata,
-                    epochs=num_epochs, batch_size=batch_size, validation_data=(test_lidar, test_data),)
-
-print(f'=============>{int(time.time() - start_time)} seconds<=============')
-
-# Plot training and validation losses
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
+# Plot training/validation loss
+plt.figure()
+plt.plot(history.history['loss'], label='Train')
+plt.plot(history.history['val_loss'], label='Val')
 plt.title('Model Loss')
 plt.ylabel('Loss')
 plt.xlabel('Epoch')
-plt.legend(['Train', 'Test'], loc='upper left')
-plt.savefig(loss_figure_path)
+plt.legend(loc='upper right')
+plt.savefig(LOSS_FIG_PATH, dpi=150, bbox_inches='tight')
 plt.close()
+print(f"Saved loss curve to {LOSS_FIG_PATH}")
 
-#======================================================
-# Model Evaluation
-#======================================================
-
-print("==========================================")
+# ========================================================
+# Evaluate
+# ========================================================
+print("\n==========================================")
 print("Model Evaluation")
 print("==========================================")
+test_loss = model.evaluate(X_test, Y_test, verbose=0)
+print(f'Overall Test Loss (Keras Huber) = {test_loss:.6f}')
 
-# Evaluate test loss
-test_loss = model.evaluate(test_lidar, test_data)
-print(f'Overall Test Loss = {test_loss}')
+Y_pred = model.predict(X_test, verbose=0)
+overall_huber = huber_loss_np(Y_test, Y_pred)
+print(f'Overall Huber Loss (numpy): {overall_huber:.6f}')
 
-# Calculate and print overall evaluation
-y_pred = model.predict(test_lidar)
-hl = huber_loss(test_data, y_pred)
-print('\nOverall Evaluation:')
-print(f'Overall Huber Loss: {hl:.3f}')
+# Per-output diagnostics
+servo_huber = huber_loss_np(Y_test[:, 0], Y_pred[:, 0])
+speed_huber = huber_loss_np(Y_test[:, 1], Y_pred[:, 1])
+print(f"Servo   Huber: {servo_huber:.6f}")
+print(f"Speed   Huber: {speed_huber:.6f}")
 
-# Calculate and print speed evaluation
-speed_y_pred = model.predict(test_lidar)[:, 1]
-speed_test_loss = huber_loss(test_data[:, 1], speed_y_pred)
-print("\nSpeed Evaluation:")
-print(f"Speed Test Loss: {speed_test_loss}")
-
-# Calculate and print servo evaluation
-servo_y_pred = model.predict(test_lidar)[:, 0]
-servo_test_loss = huber_loss(test_data[:, 0], servo_y_pred)
-print("\nServo Evaluation:")
-print(f"Servo Test Loss: {servo_test_loss}")
-
-#======================================================
-# Save Model
-#======================================================
-# Save non-quantized model
+# ========================================================
+# Save TFLite (default + Select TF Ops to keep LSTM)
+# ========================================================
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
-converter.experimental_new_converter=True
-converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS,
-tf.lite.OpsSet.SELECT_TF_OPS]
+converter.experimental_new_converter = True
+converter.target_spec.supported_ops = [
+    tf.lite.OpsSet.TFLITE_BUILTINS,
+    tf.lite.OpsSet.SELECT_TF_OPS
+]
 tflite_model = converter.convert()
-tflite_model_path = './Models/' + model_name + "_temporal_noquantized.tflite"
-with open(tflite_model_path, 'wb') as f:
+tflite_path = os.path.join(MODEL_DIR, f"{MODEL_NAME}_noquantized.tflite")
+with open(tflite_path, 'wb') as f:
     f.write(tflite_model)
-    print(f"{model_name}_noquantized.tflite is saved.")
+print(f"Saved: {tflite_path}")
 
-# # Save int8 quantized model
-# rep_32 = lidar.astype(np.float32)
-# rep_32 = np.expand_dims(rep_32, -1)
-# dataset = tf.data.Dataset.from_tensor_slices(rep_32)
-
+# # Optional: INT8 full integer quantization (needs representative dataset)
+# rep_ds = tf.data.Dataset.from_tensor_slices(X_train.astype(np.float32)).batch(1)
 # def representative_data_gen():
-#     for input_value in dataset.batch(len(lidar)).take(rep_32.shape[0]):
-#         yield [input_value]
-
+#     for x in rep_ds.take(500):
+#         yield [x]
 # converter.optimizations = [tf.lite.Optimize.DEFAULT]
 # converter.representative_dataset = representative_data_gen
 # converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-# quantized_tflite_model = converter.convert()
+# converter.inference_input_type = tf.int8
+# converter.inference_output_type = tf.int8
+# quant_model = converter.convert()
+# quant_path = os.path.join(MODEL_DIR, f"{MODEL_NAME}_int8.tflite")
+# with open(quant_path, 'wb') as f:
+#     f.write(quant_model)
+# print(f"Saved: {quant_path}")
 
-# tflite_model_path = './Models/' + model_name + "_int8.tflite"
-# with open(tflite_model_path, 'wb') as f:
-#     f.write(quantized_tflite_model)
-#     print(f"{model_name}_int8.tflite is saved.")
-
-# print('Tf_lite Models also saved')
-
-#======================================================
-# Evaluated TfLite Model
-#======================================================
-
-# def evaluate_model(model_path, test_lidar, test_data):
-#     """Evaluate TfLite model."""
-#     # Load the TFLite model
-#     interpreter = tf.lite.Interpreter(model_path=model_path)
-#     interpreter.allocate_tensors()
-#     input_index = interpreter.get_input_details()[0]["index"]
-#     output_details = interpreter.get_output_details()
-
-#     output_lidar = test_lidar
-#     output_servo = []
-#     output_speed = []
-
-#     period = 1.0 / hz
-
-#     # Initialize a list to store inference times in microseconds
-#     inference_times_micros = []
-
-#     # Iterate through the lidar data
-#     for lidar_data in output_lidar:
-#         # Preprocess lidar data for inference
-#         lidar_data = np.expand_dims(lidar_data, axis=-1).astype(np.float32)
-#         lidar_data = np.expand_dims(lidar_data, axis=0)
-
-#         # Check for empty lidar data
-#         if lidar_data is None:
-#             continue
-
-#         # Measure inference time
-#         ts = time.time()
-#         interpreter.set_tensor(input_index, lidar_data)
-#         interpreter.invoke()
-#         output = interpreter.get_tensor(output_details[0]['index'])
-#         dur = time.time() - ts
-
-#         # Convert inference time to microseconds
-#         inference_time_micros = dur * 1e6
-#         inference_times_micros.append(inference_time_micros)
-
-#         # Print inference time information
-#         if dur > period:
-#             print("%.3f: took %.2f microseconds - deadline miss." % (dur, int(dur * 1000000)))
-
-#         # Extract servo and speed output from the model
-#         servo = output[0, 0]
-#         speed = output[0, 1]
-
-#         # Append output servo and speed
-#         output_servo.append(servo)
-#         output_speed.append(speed)
-
-#     output_lidar = np.asarray(output_lidar)
-#     output_servo = np.asarray(output_servo)
-#     output_speed = np.asarray(output_speed)
-#     assert len(output_lidar) == len(output_servo) == len(output_speed)
-#     output = np.concatenate((output_servo[:, np.newaxis], output_speed[:, np.newaxis]), axis=1)
-#     y_pred = output
-
-#     # Calculate average and maximum inference times in microseconds
-#     arr = np.array(inference_times_micros)
-#     perc99 = np.percentile(arr, 99)
-#     arr = arr[arr < perc99]
-#     average_inference_time_micros = np.mean(arr)
-#     max_inference_time_micros = np.max(arr)
-
-#     # Print inference time statistics
-#     print("Model: ", model_path)
-#     print("Average Inference Time: %.2f microseconds" % average_inference_time_micros)
-#     print("Maximum Inference Time: %.2f microseconds" % max_inference_time_micros)
-
-#     return y_pred, inference_times_micros
-
-# # Initialize empty lists to store results for each model
-# all_inference_times_micros = []
-# for model_name in model_files:
-#     y_pred, inference_times_micros = evaluate_model(model_name, test_lidar, test_data)
-#     all_inference_times_micros.append(inference_times_micros)
-
-#     print(f'Huber Loss for {model_name}: {huber_loss(test_data, y_pred)}\n')
-
-# # Plot inference times
-# plt.figure()
-# for inference_times_micros in all_inference_times_micros:
-#     arr = np.array(inference_times_micros)
-#     perc99 = np.percentile(arr, 99)
-#     arr = arr[arr < perc99]
-#     plt.plot(arr)
-# plt.xlabel('Inference Iteration')
-# plt.ylabel('Inference Time (microseconds)')
-# plt.title('Inference Time per Iteration')
-# plt.legend(model_files)
-
-print('End')
+print("End")

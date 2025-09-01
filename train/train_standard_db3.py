@@ -16,6 +16,11 @@ from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 
+# lambda controls strength of speed incentive
+lambda_speed = 0.06
+speed_idx = 1  # index of speed in your model's output
+max_steering_angle = 0.2
+
 #========================================================
 # Utility functions
 #========================================================
@@ -56,6 +61,18 @@ def read_ros2_bag(bag_path):
     )
 
 
+def custom_loss(y_true, y_pred):
+    # Base Huber loss (applied to all outputs)
+    huber = tf.keras.losses.Huber()
+    
+    base_loss = huber(y_true, y_pred)
+    
+    safe_mask = tf.cast(tf.abs(y_pred[:, 0]) < max_steering_angle, tf.float32)
+    # speed_bonus = -lambda_speed * tf.reduce_mean(safe_mask * y_pred[:, speed_idx])
+    speed_bonus = -lambda_speed * tf.reduce_mean(y_pred[:, speed_idx])
+    # Total loss
+    return base_loss + speed_bonus
+
 #========================================================
 # Main
 #========================================================
@@ -63,28 +80,28 @@ if __name__ == '__main__':
     print('GPU AVAILABLE:', bool(tf.config.list_physical_devices('GPU')))
     #"Good" model
 
-    # # Bag path for decent model
-    # bag_paths = [
-    #     # 'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
-    #     # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
-    #     # # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/forza_pf_map/forza_pf_map_0.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP/Forza_GLC_smile_PP_0.db3', #evil
-    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_glc_ot_ez_3laps/Forza_glc_ot_ez_3laps_0.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_small_3laps/Forza_GLC_smile_small_3laps_0.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_hangar_1905_v0_1lap/Forza_hangar_1905_v0_1lap_0.db3',
-    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
-    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map/test_map.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_opp/test_map_opp.db3',
-    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
-    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
-    #     # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
-    # ]
+    # Bag path for decent model
+    bag_paths = [
+        # 'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+        # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+        # # 'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/forza_pf_map/forza_pf_map_0.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP/Forza_GLC_smile_PP_0.db3', #evil
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_glc_ot_ez_3laps/Forza_glc_ot_ez_3laps_0.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_small_3laps/Forza_GLC_smile_small_3laps_0.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_hangar_1905_v0_1lap/Forza_hangar_1905_v0_1lap_0.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map/test_map.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_opp/test_map_opp.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+        # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
+    ]
 
     #Everything
 
@@ -116,23 +133,23 @@ if __name__ == '__main__':
     #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
     # ]
 
-    #GOLDENIsh
-    bag_paths = [
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_nonobstr_edited/JFRv6_nonobstr_edited.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv5_nonobstr_edited/JFRv5_nonobstr_edited.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
+    # #GOLDENIsh
+    # bag_paths = [
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_nonobstr_edited/JFRv6_nonobstr_edited.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv5_nonobstr_edited/JFRv5_nonobstr_edited.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
         
 
-    ]
+    # ]
     
     # #CLose, but slow
     # bag_paths = [
@@ -161,7 +178,7 @@ if __name__ == '__main__':
 
     batch_size = 64
     lr = 5e-5
-    num_epochs = 30
+    num_epochs = 10
     model_name = 'lidar_imitation_model'
     loss_figure_path = f'./Models/{model_name}_loss.png'
 
@@ -220,9 +237,9 @@ if __name__ == '__main__':
     ])
 
     # Compile
-    loss_function = tf.keras.losses.Huber()
+
     optimizer = tf.keras.optimizers.Adam(lr)
-    model.compile(optimizer=optimizer, loss=loss_function)
+    model.compile(optimizer=optimizer, loss=custom_loss)
     model.summary()
 
     # Train

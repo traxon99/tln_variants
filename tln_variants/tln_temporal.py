@@ -20,7 +20,7 @@ class TLNStandard(Node):
         self.odom_subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
 
         # Load TFLite model
-        self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/f1_tenth_model_temporal_M_noquantized.tflite"
+        self.model_path = "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_temporal_compact_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
@@ -44,7 +44,7 @@ class TLNStandard(Node):
         return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
 
     def scan_callback(self, msg):
-        scans = np.array(msg.ranges)
+        scans = np.array(msg.ranges[::2])
         noise = np.random.normal(0, 0.5, scans.shape)
         scans = np.clip(scans + noise, 0, 10)
 
@@ -70,7 +70,7 @@ class TLNStandard(Node):
         steer = output[0, 0]
         raw_speed = output[0, 1]
         min_speed = 1
-        max_speed = 13
+        max_speed = 8
         speed = self.linear_map(raw_speed, 0, 1, min_speed, max_speed)
         if not np.isfinite(speed) or not np.isfinite(steer):
             self.get_logger().warn("Invalid model output, skipping publish.")
@@ -95,18 +95,6 @@ class TLNStandard(Node):
         self.position = msg.pose.pose.position
         self.orientation = msg.pose.pose.orientation
 
-    def detect_crash(self):
-        # Option 1: Too close to object repeatedly
-        if len(self.scan) >= self.window_size:
-            for i in range(len(self.scan) - self.window_size + 1):
-                if all(val <= 0.2 for val in self.scan[i:i + self.window_size]):
-                    return True
-
-        # Option 2: Stopped for too long
-        if len(self.speed_queue) == self.speed_queue.maxlen and all(s < 0.05 for s in self.speed_queue):
-            return True
-
-        return False
 
     def print_avg_speed(self):
         avg = np.mean(self.speed_vals) if len(self.speed_vals) > 0 else 0.0
