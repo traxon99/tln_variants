@@ -8,6 +8,7 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from sensor_msgs.msg import Joy
 
+TLN_M = False
 
 class TLNStandard(Node):
     def __init__(self):
@@ -19,8 +20,8 @@ class TLNStandard(Node):
         #global boolean for Autonomous control
         self.go = False
         self.sim = True
-        self.init_min_speed = 1
-        self.init_max_speed = 8
+        self.init_min_speed = 1#1
+        self.init_max_speed = 8#8
         self.min_speed = self.init_min_speed
         self.max_speed = self.init_max_speed
         self.working_max_speed = self.init_max_speed
@@ -30,17 +31,26 @@ class TLNStandard(Node):
         self.launching = False
         
         self.speed_mappings = [self.linear_map, self.exp_map_abs]
-        self.speed_map = self.speed_mappings[1]
+        self.speed_map = self.speed_mappings[0]
         
         
         self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         # self.stats_publisher = self.create_publisher('/stats', 10)
         self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.joy_subscription = self.create_subscription(Joy,'joy',self.joy_callback, 10)
-        
-        
+        # self.joy_subscription = self.create_subscription(Joy,'joy',self.joy_callback, 10)
 
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_M_noquantized.tflite"
+        # 0.2       5hz
+        # 0.1       10hz
+        # 0.05      20hz
+        # 0.025     40hz
+        
+        
+        
+        self.timer = self.create_timer(0.0001, self.inference_dnn)
+        self.downscale_factor = 2
+        self.scan = None
+
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_noquantized.tflite"
         # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_sim_data_aus_mos_spl.tflite" # good
         # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_Forza.tflite"
         # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/Forza_GLC_smile_ot_ez.tflite" # almost good
@@ -48,13 +58,16 @@ class TLNStandard(Node):
         # self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/very_close.tflite"
         
         #TFlite
-        self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/lidar_imitation_model_noquantized.tflite"
+        # self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/lidar_imitation_model_noquantized_d.tflite"
+        self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite" # Last used
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
         self.output_index = self.interpreter.get_output_details()[0]["index"]
         
-        self.get_logger().warn('TLNNode Ready. Press Right Shoulder to Activate.')
+        self.get_logger().warn('TLN Node Ready.')
+        if not(self.sim):
+            self.get_logger().warn('Press right bumper to activate.')
 
     # Utility functions
     def ns_2_s(self, ns):
@@ -135,12 +148,12 @@ class TLNStandard(Node):
 
             
     def scan_callback(self, msg):
-        if self.go:
+        if self.go or self.sim:
             scan_proc_time_start = time.time()
             
             scans = np.array(msg.ranges)
-            
-            # scans = np.append(scans, [20]) #Only for Original TLN (541 scans)
+            if TLN_M:
+                scans = np.append(scans, [20]) #Only for Original TLN (541 scans)
             
             # self.get_logger().info(f'num scans:{len(scans)}')
             
@@ -150,12 +163,35 @@ class TLNStandard(Node):
             
             #Clip values beyond 10m
             scans[scans > 10] = 10
-            scans = scans[::2]  # Use every other value
+            scans = scans[::self.downscale_factor]  # Use every other value
             scans = np.expand_dims(scans, axis=-1).astype(np.float32)
             scans = np.expand_dims(scans, axis=0)
 
+            self.scan = scans
+            # self.interpreter.set_tensor(self.input_index, scans)
+            # start_time = time.time()
+            # self.interpreter.invoke()
+            # inf_time = (time.time() - start_time) * 1000  # in milliseconds
 
-            self.interpreter.set_tensor(self.input_index, scans)
+
+            # output = self.interpreter.get_tensor(self.output_index)
+            # steer = output[0, 0]
+            # speed = output[0, 1]
+
+            # speed = self.speed_map(speed, 0, 1, self.min_speed, self.max_speed)
+            # self.get_logger().info(f"speed: {speed},steer: {steer}")
+            # self.publish_ackermann_drive(speed, steer)
+            
+            # scan_proc_time = (time.time() - scan_proc_time_start) * 1000  # in milliseconds
+            # self.get_logger().info(f'Inference time: {inf_time:.2f} ms')
+            # self.get_logger().info(f'Processing time: {scan_proc_time:.2f} ms')
+            
+            # self.publish_stats(inf_time, scan_proc_time)
+        else:
+            self.publish_ackermann_drive(0, 0)
+    def inference_dnn(self):
+        if self.scan is not None:
+            self.interpreter.set_tensor(self.input_index, self.scan)
             start_time = time.time()
             self.interpreter.invoke()
             inf_time = (time.time() - start_time) * 1000  # in milliseconds
@@ -166,16 +202,10 @@ class TLNStandard(Node):
             speed = output[0, 1]
 
             speed = self.speed_map(speed, 0, 1, self.min_speed, self.max_speed)
-
+            self.get_logger().info(f"speed: {speed},steer: {steer}")
             self.publish_ackermann_drive(speed, steer)
-            
-            scan_proc_time = (time.time() - scan_proc_time_start) * 1000  # in milliseconds
-            # self.get_logger().info(f'Inference time: {inf_time:.2f} ms')
-            # self.get_logger().info(f'Processing time: {scan_proc_time:.2f} ms')
-            
-            self.publish_stats(inf_time, scan_proc_time)
-        else:
-            self.publish_ackermann_drive(0, 0)
+        
+        
     def publish_stats(self, inf_time, scan_proc_time):
         pass
     def publish_ackermann_drive(self, speed, steering_angle):

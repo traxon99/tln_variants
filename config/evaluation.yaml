@@ -1,0 +1,14 @@
+evaluation:
+  ros__parameters:
+    # topics and namespaces
+    ego_scan_topic: 'scan'
+    ego_odom_topic: 'odom'
+    
+    #evaluation parameters
+    model_name: 'TLN_Forza'
+    
+    max_laps: 1
+    evaluation_lap: 0
+    centerline_path: '/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Austin_centerline.csv'
+    map_path: '/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Austin'
+    map_img_ext: '.png'

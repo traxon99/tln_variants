@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+import os
+import time
+import numpy as np
+import tensorflow as tf
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from sklearn.utils import shuffle
+from sklearn.model_selection import train_test_split
+
+import keras-tcn
+
+# ROS 2 bag imports
+from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
+from rclpy.serialization import deserialize_message
+from sensor_msgs.msg import LaserScan
+from ackermann_msgs.msg import AckermannDriveStamped
+from nav_msgs.msg import Odometry
+
+'''
+classifications:
+0 - 
+1 - 
+2 -
+3 -
+
+
+'''
+
+
+
+#========================================================
+# Utility functions
+#========================================================
+def linear_map(x, x_min, x_max, y_min, y_max):
+    return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
+
+def read_ros2_bag(bag_path):
+    storage_opts = StorageOptions(uri=bag_path, storage_id='sqlite3')
+    conv_opts = ConverterOptions(input_serialization_format='', output_serialization_format='')
+    reader = SequentialReader()
+    reader.open(storage_opts, conv_opts)
+
+    lidar_data, servo_data, speed_data, classifications, timestamps = [], [], [], []
+    
+    max_spd = 0
+
+    while reader.has_next():
+        topic, serialized_msg, t_ns = reader.read_next()
+        t = t_ns * 1e-9
+
+        if topic == 'scan' or topic == 'Lidar':
+            msg = deserialize_message(serialized_msg, LaserScan)
+            cleaned = np.nan_to_num(msg.ranges, posinf=0.0, neginf=0.0)
+            lidar_data.append(cleaned[::2])
+            timestamps.append(t)
+        elif topic == 'drive' or topic == 'Ackermann':
+            msg = deserialize_message(serialized_msg, AckermannDriveStamped)
+            servo_data.append(msg.drive.steering_angle)
+            if msg.drive.speed > max_spd:
+                max_spd = msg.drive.speed
+            speed_data.append(msg.drive.speed)
+        classifications.append(1)
+        # elif topic == 'odom':
+        #     msg = deserialize_message(serialized_msg, Odometry)
+        #     servo_data.append(msg.twist.twist.angular.z)
+        #     speed_data.append(msg.twist.twist.linear.x)
+
+    return (
+        np.array(lidar_data),
+        np.array(servo_data),
+        np.array(speed_data),
+        np.array(classifications),
+        np.array(timestamps),
+        max_spd
+    )
+
+
+
+#========================================================
+# Main
+#========================================================
+if __name__ == '__main__':
+    print('GPU AVAILABLE:', bool(tf.config.list_physical_devices('GPU')))
+    #"Good" model
+
+    # Bag path for decent model TLN_Forza WITH CUSTOM LOSS - Current prelim results
+    bag_paths = [
+        "",
+    ]
+
+
+    batch_size = 64
+    lr = 5e-5
+    num_epochs = 20# 20 #10
+    model_name = 'TLN_Classifier'
+    loss_figure_path = f'./Models/{model_name}_loss.png'
+
+    all_lidar, all_servo, all_speed, all_ts = [], [], [], []
+    for pth in bag_paths:
+        l, s, sp, ts, max_spd = read_ros2_bag(pth)
+        print(f'Loaded {len(l)} scans from {pth}')
+        print(f"max speed: {max_spd}")
+        all_lidar.extend(l)
+        all_servo.extend(s)
+        all_speed.extend(sp)
+        all_ts.extend(ts)
+    
+    lidar = np.array(all_lidar)#[:-1]
+
+    #add noise
+    noise = np.random.normal(0,0.15,lidar.shape)   
+    print(noise[1])
+    
+    print(noise.shape)
+
+    lidar = lidar + noise
+    
+    servo = np.array(all_servo)
+    speed = np.array(all_speed)
+
+    speed = linear_map(speed, speed.min(), speed.max(), 0, 1)
+
+    # Shuffle data
+    lidar, servo, speed = shuffle(lidar, servo, speed, random_state=42)
+
+    # Train/test split
+    lidar_train, lidar_test, servo_train, servo_test, speed_train, speed_test = train_test_split(
+        lidar, servo, speed, test_size=0.2, random_state=42
+    )
+
+    train_data = np.stack((servo_train, speed_train), axis=-1)
+    test_data = np.stack((servo_test, speed_test), axis=-1)
+
+    # Reshape input
+    lidar_train = lidar_train[..., np.newaxis]
+    lidar_test = lidar_test[..., np.newaxis]
+
+    # Model
+    num_lidar_range_values = lidar.shape[1]
+    model = tf.keras.Sequential([
+        tf.keras.layers.Conv1D(24, 10, strides=4, activation='relu', input_shape=(num_lidar_range_values, 1)),
+        tf.keras.layers.Conv1D(36, 8, strides=4, activation='relu'),
+        tf.keras.layers.Conv1D(48, 4, strides=2, activation='relu'),
+        tf.keras.layers.Conv1D(64, 3, activation='relu'),
+        tf.keras.layers.Conv1D(64, 3, activation='relu'),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(100, activation='relu'),
+        tf.keras.layers.Dense(50, activation='relu'),
+        tf.keras.layers.Dense(10, activation='relu'),
+        tf.keras.layers.Dense(2, activation='tanh')
+    ])
+
+    # Compile
+
+    optimizer = tf.keras.optimizers.Adam(lr)
+    huber = tf.keras.losses.Huber()
+    model.compile(optimizer=optimizer, loss=huber)
+    model.summary()
+
+    # Train
+    start_time = time.time()
+    history = model.fit(
+        lidar_train, train_data,
+        epochs=num_epochs,
+        batch_size=batch_size,
+        validation_data=(lidar_test, test_data)
+    )
+    print(f'Training Time: {int(time.time() - start_time)} seconds')
+
+    # Plot Loss
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('Model Loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Validation'], loc='upper right')
+    os.makedirs(os.path.dirname(loss_figure_path), exist_ok=True)
+    plt.savefig(loss_figure_path)
+    plt.close()
+
+    # Evaluate
+    print("\nModel Evaluation")
+    test_loss = model.evaluate(lidar_test, test_data)
+    print(f'Overall Test Loss: {test_loss:.4f}')
+
+    predictions = model.predict(lidar_test)
+    huber = tf.keras.losses.Huber()
+    print(f"Servo Test Huber Loss: {huber(test_data[:, 0], predictions[:, 0]).numpy():.4f}")
+    print(f"Speed Test Huber Loss: {huber(test_data[:, 1], predictions[:, 1]).numpy():.4f}")
+
+    # Save Model
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    tflite_model = converter.convert()
+    os.makedirs('./Models', exist_ok=True)
+    with open(f'./Models/{model_name}_noquantized.tflite', 'wb') as f:
+        f.write(tflite_model)
+        print(f"{model_name}_noquantized.tflite saved.")

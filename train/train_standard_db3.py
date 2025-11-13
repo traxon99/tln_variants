@@ -16,10 +16,8 @@ from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 
-# lambda controls strength of speed incentive
-lambda_speed = 0.06
-speed_idx = 1  # index of speed in your model's output
-max_steering_angle = 0.2
+DOWNSCALE_FACTOR = 2
+max_spd = 0
 
 #========================================================
 # Utility functions
@@ -34,6 +32,8 @@ def read_ros2_bag(bag_path):
     reader.open(storage_opts, conv_opts)
 
     lidar_data, servo_data, speed_data, timestamps = [], [], [], []
+    
+    max_spd = 0
 
     while reader.has_next():
         topic, serialized_msg, t_ns = reader.read_next()
@@ -42,11 +42,13 @@ def read_ros2_bag(bag_path):
         if topic == 'scan' or topic == 'Lidar':
             msg = deserialize_message(serialized_msg, LaserScan)
             cleaned = np.nan_to_num(msg.ranges, posinf=0.0, neginf=0.0)
-            lidar_data.append(cleaned[::2])
+            lidar_data.append(cleaned[::DOWNSCALE_FACTOR])
             timestamps.append(t)
         elif topic == 'drive' or topic == 'Ackermann':
             msg = deserialize_message(serialized_msg, AckermannDriveStamped)
             servo_data.append(msg.drive.steering_angle)
+            if msg.drive.speed > max_spd:
+                max_spd = msg.drive.speed
             speed_data.append(msg.drive.speed)
         # elif topic == 'odom':
         #     msg = deserialize_message(serialized_msg, Odometry)
@@ -57,21 +59,10 @@ def read_ros2_bag(bag_path):
         np.array(lidar_data),
         np.array(servo_data),
         np.array(speed_data),
-        np.array(timestamps)
+        np.array(timestamps),
     )
 
 
-def custom_loss(y_true, y_pred):
-    # Base Huber loss (applied to all outputs)
-    huber = tf.keras.losses.Huber()
-    
-    base_loss = huber(y_true, y_pred)
-    
-    safe_mask = tf.cast(tf.abs(y_pred[:, 0]) < max_steering_angle, tf.float32)
-    # speed_bonus = -lambda_speed * tf.reduce_mean(safe_mask * y_pred[:, speed_idx])
-    speed_bonus = -lambda_speed * tf.reduce_mean(y_pred[:, speed_idx])
-    # Total loss
-    return base_loss + speed_bonus
 
 #========================================================
 # Main
@@ -80,7 +71,7 @@ if __name__ == '__main__':
     print('GPU AVAILABLE:', bool(tf.config.list_physical_devices('GPU')))
     #"Good" model
 
-    # Bag path for decent model
+    # Bag path for decent model TLN_Forza WITH CUSTOM LOSS - Current prelim results
     bag_paths = [
         # 'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
         # # 'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
@@ -102,6 +93,26 @@ if __name__ == '__main__':
         '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
         # '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/test_map_obstacles_good/test_map_obstacles_good.db3'
     ]
+    
+    #TLN Standard
+    # bag_paths = [
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
+    # ]
+    
+    #Bad
+    # bag_paths = [
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3', #could be bad... or good
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_test_real_dataset/lab_test_real_no_obst/lab_test_real_no_obst.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_test_real_dataset/lab_test_real_obst/lab_test_real_obst.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_test_real_dataset/lab_test_real_obst2/lab_test_real_obst2.db3'
+        
+    # ]
 
     #Everything
 
@@ -178,14 +189,15 @@ if __name__ == '__main__':
 
     batch_size = 64
     lr = 5e-5
-    num_epochs = 10
-    model_name = 'lidar_imitation_model'
+    num_epochs = 20# 20 #10
+    model_name = 'TLN_M'
     loss_figure_path = f'./Models/{model_name}_loss.png'
 
     all_lidar, all_servo, all_speed, all_ts = [], [], [], []
     for pth in bag_paths:
-        l, s, sp, ts = read_ros2_bag(pth)
+        l, s, sp, ts, max_spd = read_ros2_bag(pth)
         print(f'Loaded {len(l)} scans from {pth}')
+        print(f"max speed: {max_spd}")
         all_lidar.extend(l)
         all_servo.extend(s)
         all_speed.extend(sp)
@@ -194,12 +206,12 @@ if __name__ == '__main__':
     lidar = np.array(all_lidar)#[:-1]
 
     #add noise
-    noise = np.random.normal(0,0.15,lidar.shape)   
-    print(noise[1])
+    # noise = np.random.normal(0,0.15,lidar.shape)   
+    # print(noise[1])
     
-    print(noise.shape)
+    # print(noise.shape)
 
-    lidar = lidar + noise
+    # lidar = lidar + noise
     
     servo = np.array(all_servo)
     speed = np.array(all_speed)
@@ -239,7 +251,8 @@ if __name__ == '__main__':
     # Compile
 
     optimizer = tf.keras.optimizers.Adam(lr)
-    model.compile(optimizer=optimizer, loss=custom_loss)
+    huber = tf.keras.losses.Huber()
+    model.compile(optimizer=optimizer, loss=huber)
     model.summary()
 
     # Train
