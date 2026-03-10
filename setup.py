@@ -35,7 +35,8 @@ setup(
             'rln = tln_variants.rln:main',
             'rln_collect = tln_variants.rnn_data_collection:main',
             'rln_no_ts = tln_variants.rln_no_ts:main',
-            'rln_sim = tln_variants.rln_sim:main'
+            'rln_sim = tln_variants.rln_sim:main',
+            'collect_rosbags = tln_variants.data_collection_rosbags:main'
         ],
     },
 )

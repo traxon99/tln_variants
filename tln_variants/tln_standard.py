@@ -50,7 +50,7 @@ class TLNStandard(Node):
         #timer to control dnn inference rate, rather than being limited by scan callback.
         self.timer = self.create_timer(0.0001, self.inference_dnn)
         
-        #downscale factor for 
+        #downscale factor for scans
         self.downscale_factor = 2
         
         #used to store intermediate scan
@@ -66,6 +66,7 @@ class TLNStandard(Node):
         #TFlite
         # self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/lidar_imitation_model_noquantized_d.tflite"
         self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite" # Last used
+        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza_Oval_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
