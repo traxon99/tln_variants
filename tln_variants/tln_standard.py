@@ -17,25 +17,35 @@ TLN_M = False
 class TLNStandard(Node):
     def __init__(self):
         super().__init__('tln_standard')
-        
+
         self.get_logger().info('TLNNode has been started.')
-        
-        
+
+        # Declare ROS2 parameters (overridable via config file or command line)
+        self.declare_parameter('sim', True)
+        self.declare_parameter('min_speed', 1.0)
+        self.declare_parameter('max_speed', 8.0)
+        self.declare_parameter('downscale_factor', 2)
+        self.declare_parameter('model_path', '/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite')
+
+        # Load parameters
+        self.sim = self.get_parameter('sim').value
+        self.init_min_speed = self.get_parameter('min_speed').value
+        self.init_max_speed = self.get_parameter('max_speed').value
+        self.downscale_factor = self.get_parameter('downscale_factor').value
+        self.model_path = self.get_parameter('model_path').value
+
         #global boolean for Autonomous control
         self.go = False
-        self.sim = True
-        self.init_min_speed = 1#1
-        self.init_max_speed = 8#8
         self.min_speed = self.init_min_speed
-        self.max_speed = self.init_max_speed        
-        
+        self.max_speed = self.init_max_speed
+
         self.launch = False
         self.launching = False
-        
+
         self.speed_mappings = [self.linear_map, self.exp_map_abs]
         self.speed_map = self.speed_mappings[0]
-        
-        
+
+
         self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         # self.stats_publisher = self.create_publisher('/stats', 10)
         self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
@@ -45,36 +55,22 @@ class TLNStandard(Node):
         # 0.1       10hz
         # 0.05      20hz
         # 0.025     40hz
-        
-        
+
+
         #timer to control dnn inference rate, rather than being limited by scan callback.
         self.timer = self.create_timer(0.0001, self.inference_dnn)
-        
-        #downscale factor for scans
-        self.downscale_factor = 2
-        
+
         #used to store intermediate scan
         self.scan = None
 
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_noquantized.tflite"
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_sim_data_aus_mos_spl.tflite" # good
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLN_Forza.tflite"
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/Forza_GLC_smile_ot_ez.tflite" # almost good
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/models/TLNETH_with_edgecases.tflite"
-        # self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/very_close.tflite"
-        
-        #TFlite
-        # self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/lidar_imitation_model_noquantized_d.tflite"
-        self.model_path= "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite" # Last used
-        # self.model_path = "/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza_Oval_noquantized.tflite"
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
         self.output_index = self.interpreter.get_output_details()[0]["index"]
-        
-        self.get_logger().warn('TLN Node Ready.')
-        
-        if not(self.sim):
+
+        self.get_logger().warn(f'TLN Node Ready. sim={self.sim}, model={self.model_path}')
+
+        if not self.sim:
             self.get_logger().warn('Press right bumper to activate.')
 
     # Utility functions
@@ -179,9 +175,10 @@ class TLNStandard(Node):
                 scans = np.append(scans, [20]) #Only for Original TLN (541 scans)
             
                         
-            #Needs to be if sim == true -> Add noise
-            noise = np.random.normal(0, 0.5, scans.shape)
-            scans = scans + noise
+            # Add noise only in simulation to improve sim-to-real transfer
+            if self.sim:
+                noise = np.random.normal(0, 0.5, scans.shape)
+                scans = scans + noise
             
             #Clip values beyond 10m
             scans[scans > 10] = 10
