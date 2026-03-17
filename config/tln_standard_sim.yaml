@@ -1,0 +1,14 @@
+tln_standard:
+  ros__parameters:
+    # Run in simulation mode: enables LiDAR noise injection for sim-to-real transfer
+    sim: true
+
+    # Speed limits (m/s)
+    min_speed: 1.0
+    max_speed: 8.0
+
+    # Use every Nth LiDAR beam (2 = half resolution)
+    downscale_factor: 2
+
+    # Path to the TFLite model
+    model_path: '/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite'
