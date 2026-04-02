@@ -105,6 +105,28 @@ def plot_steer_vs_time(steers, timestamps, bag_name, out_path):
     print(f'  Plot saved: {out_path}')
 
 
+def plot_steer_histogram(steers, bag_name, out_path):
+    """Save a steering angle histogram to visualise left/right imbalance."""
+    left = np.sum(steers < 0)
+    right = np.sum(steers > 0)
+    total = len(steers)
+    left_pct = 100.0 * left / total if total > 0 else 0.0
+    right_pct = 100.0 * right / total if total > 0 else 0.0
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(steers, bins=60, range=(STEER_Y_MIN, STEER_Y_MAX), color='darkorange', edgecolor='white', linewidth=0.3)
+    ax.axvline(0, color='gray', linewidth=0.8, linestyle='--')
+    ax.set_xlim(STEER_Y_MIN, STEER_Y_MAX)
+    ax.set_xlabel('Steering Angle (rad)')
+    ax.set_ylabel('Sample Count')
+    ax.set_title(f'Steering Histogram — {bag_name}\nLeft {left_pct:.1f}%  |  Right {right_pct:.1f}%')
+    ax.grid(True, alpha=0.4, axis='y')
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    print(f'  Plot saved: {out_path}')
+
+
 # ============================================================
 # Metrics helpers
 # ============================================================
@@ -180,6 +202,10 @@ def main():
             steer_plot_path = os.path.join(PLOTS_DIR, f'{bag_name}_steer.png')
             plot_steer_vs_time(steers, timestamps, bag_name, steer_plot_path)
 
+            # Steering histogram
+            hist_path = os.path.join(PLOTS_DIR, f'{bag_name}_steer_hist.png')
+            plot_steer_histogram(steers, bag_name, hist_path)
+
             # Per-bag metrics
             m = compute_metrics(speeds, steers)
             per_bag_metrics.append((bag_name, m))
@@ -209,6 +235,9 @@ def main():
 
             combined_steer_path = os.path.join(PLOTS_DIR, '_combined_steer.png')
             plot_steer_vs_time(all_steers, combined_ts, 'Combined (all bags)', combined_steer_path)
+
+            combined_hist_path = os.path.join(PLOTS_DIR, '_combined_steer_hist.png')
+            plot_steer_histogram(all_steers, 'Combined (all bags)', combined_hist_path)
 
             print(f'\nMetrics saved: {METRICS_FILE}')
             print(f'\n--- COMBINED METRICS ---')
