@@ -68,6 +68,10 @@ pip install tensorflow numpy matplotlib scikit-learn
 
 ## Package Setup and Building
 
+Note: The simulation environment for this project is [f1tenth_gym_ros](https://github.com/f1tenth/f1tenth_gym_ros). Please follow installation steps there to use the simulation features in this project. 
+
+### Adding tln_variants to Your Workspace
+
 1. Clone into your ROS2 workspace `src/` directory:
    ```bash
    cd ~/sim_ws/src
