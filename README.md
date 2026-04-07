@@ -125,7 +125,7 @@ tln_standard:
 | `tln_override` | `TLNStandardOverride` | TLN with partial joystick override for speed and/or steering. **Note: not fully functional.** |
 | `rln_sim` | `RLNSim` | RLN using a 5-frame temporal scan buffer with time-delta channel. Intended for simulation. |
 | `rln_no_ts` | `AutonomousNode` | RLN without timestamp channel. Runs at 40 Hz on a timer. Includes joystick kill-switch (A button). |
-| `ftg` | `FtgNode` | Follow-the-Gap classical controller. Used as a baseline and for collecting training data. |
+| `ftg` | `FtgNode` | Follow-the-Gap classical controller. Used as a baseline and for collecting training data. Based on F1Tenth Benchmarks implementation |
 | `collect` | `DataCollection` | Records synchronized (LiDAR, drive command, odometry) rows to a timestamped CSV file. |
 | `collect_rosbags` | — | Records data to ROS2 db3 bag format. |
 | `joy_test` | `JoyListener` | Prints raw joystick axes and buttons — useful for verifying controller connectivity. |
@@ -281,10 +281,10 @@ This prints the raw axes and button values from `/joy`. Confirm the axes indices
 
 | Model | Architecture | Training data | Notes |
 |---|---|---|---|
-| `TLN_M_noquantized.tflite` | TLN (standard) | Mixed sim tracks | General-purpose baseline |
-| `f1_tenth_model_temporal_M_noquantized.tflite` | TLN (temporal) | Mixed sim tracks | Temporal variant |
-| `RLN_TLN_M.tflite` | RLN (BiLSTM+Attn) | Mixed real + sim | Combined real/sim training |
-| `RLN_with_TLN_data.tflite` | RLN | TLN sim data | RLN trained on sim-collected data |
+| `TLN_M_noquantized.tflite` | TLN (standard) | Medium size: Uses every 2 scans | General-purpose baseline |
+| `f1_tenth_model_temporal_M_noquantized.tflite` | TLN (temporal) | Medium size: Uses every 2 scans | Temporal variant |
+| `RLN_TLN_M.tflite` | RLN (BiLSTM+Attn) | Medium size: Uses every 2 scans | Combined real/sim training |
+| `RLN_with_TLN_data.tflite` | RLN | TLN physical data | RLN trained on sim-collected data |
 
 **Inference timing (TLN standard, CPU):** ~100–500 µs per scan at 40 Hz — well within the 25 ms deadline.
 
