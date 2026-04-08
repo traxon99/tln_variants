@@ -24,12 +24,24 @@ from ackermann_msgs.msg import AckermannDriveStamped
 # ============================================================
 # Configure bag paths here
 # ============================================================
-bag_paths = [
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_ccw_forza/3_26_ccw_forza.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_forza/3_26_cw_forza.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_oval_12_4_25/lab_oval_12_4_25.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3',
-]
+# bag_paths = [
+#     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_ccw_forza/3_26_ccw_forza.db3',
+#     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_forza/3_26_cw_forza.db3',
+#     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_oval_12_4_25/lab_oval_12_4_25.db3',
+#     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3',
+# ]
+    
+def find_db3_files(directory):
+    db3_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.db3'):
+                db3_files.append(os.path.join(root, file))
+    return db3_files
+
+# TLN Standard
+bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/TLN_Original_Dataset')
+
 
 PLOTS_DIR = os.path.join(os.path.dirname(__file__), 'plots')
 METRICS_FILE = os.path.join(os.path.dirname(__file__), 'metrics.txt')
