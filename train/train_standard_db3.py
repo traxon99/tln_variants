@@ -103,11 +103,24 @@ if __name__ == '__main__':
     #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_20_easy_forza2/2_20_easy_forza2.db3',
     #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3'
     # ]
-    bag_paths = [
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3'   
-    ]
-
     
+    # bag_paths = [
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_ccw_forza/3_26_ccw_forza.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_forza/3_26_cw_forza.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_edge_forza/3_26_cw_edge_forza.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_edge2_forza/3_26_cw_edge2_forza.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_edge3_forza/3_26_cw_edge3_forza.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/3_26/3_26_cw_obstacles_forza/3_26_cw_obstacles_forza.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_oval_12_4_25/lab_oval_12_4_25.db3',
+    #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3'
+
+    # ]
+    
+    bag_paths = [
+        'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+        'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+        'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+    ]
     #TLN Standard
     # bag_paths = [
     #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
@@ -203,8 +216,8 @@ if __name__ == '__main__':
 
     batch_size = 64
     lr = 5e-5
-    num_epochs = 20# 20 #10
-    model_name = 'TLN_Forza_Hard_2_27'
+    num_epochs = 10# 20 #10
+    model_name = 'test'
     loss_figure_path = f'./Models/{model_name}_loss.png'
 
     all_lidar, all_servo, all_speed, all_ts = [], [], [], []
@@ -228,7 +241,7 @@ if __name__ == '__main__':
     
     servo = np.array(all_servo)
     speed = np.array(all_speed)
-
+    print(speed.max())
     speed = linear_map(speed, speed.min(), speed.max(), 0, 1)
 
     # Shuffle data
@@ -262,6 +275,12 @@ if __name__ == '__main__':
     ])
 
     # Compile
+
+    def weighted_mse(y_true, y_pred):
+        steer_weight = 1.0 + 5.0 * tf.abs(y_true[:, 0])  # higher weight for turns
+        speed_loss = tf.square(y_true[:, 1] - y_pred[:, 1])
+        steer_loss = tf.square(y_true[:, 0] - y_pred[:, 0]) * steer_weight
+        return tf.reduce_mean(steer_loss + speed_loss)
 
     optimizer = tf.keras.optimizers.Adam(lr)
     huber = tf.keras.losses.Huber()
