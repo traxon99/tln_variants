@@ -9,9 +9,9 @@ from collections import deque
 from nav_msgs.msg import Odometry
 
 
-class TLNStandard(Node):
+class TLNTemporal(Node):
     def __init__(self):
-        super().__init__('tln_standard')
+        super().__init__('tln_temporal')
         self.get_logger().info('TLN Node has been started.')
 
         # ROS interfaces
@@ -28,10 +28,7 @@ class TLNStandard(Node):
         self.output_index = self.interpreter.get_output_details()[0]["index"]
 
         # Buffers
-        self.scan_buffer = deque(maxlen=125)  # For temporal scan history
-        self.speed_queue = deque(maxlen=10)   # For crash detection
-        self.speed_vals = np.array([])        # For average speed
-        self.scan = []                        # For crash detection
+        self.scan_buffer = deque(maxlen=60)  # For temporal scan history
 
         # Odometry
         self.position = None
@@ -45,18 +42,16 @@ class TLNStandard(Node):
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges[::2])
-        noise = np.random.normal(0, 0.5, scans.shape)
-        scans = np.clip(scans + noise, 0, 10)
 
         self.scan = scans  # for crash detection
         self.scan_buffer.append(scans)
 
         # Get previous scans
-        t_5 = self.scan_buffer[-5] if len(self.scan_buffer) >= 5 else np.zeros_like(scans)
-        t_10 = self.scan_buffer[-10] if len(self.scan_buffer) >= 10 else np.zeros_like(scans)
+        t_30 = self.scan_buffer[-30] if len(self.scan_buffer) >= 30 else np.zeros_like(scans)
+        t_60 = self.scan_buffer[-60] if len(self.scan_buffer) >= 60 else np.zeros_like(scans)
 
         # Combine scans (current, t-5, t-10)
-        scans_combined = np.stack((scans, t_5, t_10), axis=0)
+        scans_combined = np.stack((scans, t_30, t_60), axis=0)
         scans_combined = np.expand_dims(scans_combined, axis=-1).astype(np.float32)  # (3, N, 1)
         scans_combined = np.expand_dims(scans_combined, axis=0)  # (1, 3, N, 1)
 
@@ -76,8 +71,6 @@ class TLNStandard(Node):
             self.get_logger().warn("Invalid model output, skipping publish.")
             return
 
-        self.speed_vals = np.append(self.speed_vals, speed)
-        self.speed_queue.append(speed)
 
         self.publish_ackermann_drive(speed, steer)
 
@@ -95,21 +88,14 @@ class TLNStandard(Node):
         self.position = msg.pose.pose.position
         self.orientation = msg.pose.pose.orientation
 
-
-    def print_avg_speed(self):
-        avg = np.mean(self.speed_vals) if len(self.speed_vals) > 0 else 0.0
-        self.get_logger().info(f'Average speed: {avg:.2f} m/s')
-
-
 def main(args=None):
     rclpy.init(args=args)
-    node = TLNStandard()
+    node = TLNTemporal()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard Interrupt (SIGINT)')
     finally:
-        node.print_avg_speed()
         node.destroy_node()
         rclpy.shutdown()
 

@@ -1,325 +1,336 @@
 #!/usr/bin/env python3
+"""Temporal LiDAR Navigation (TLN) training script.
+
+Each sample is a triplet of LiDAR scans ordered oldest→newest:
+    [scan(t-offset2), scan(t-offset1), scan(t)]  →  [steering(t), speed(t)]
+
+Key design choices
+------------------
+* Commands are interpolated onto LiDAR timestamps (np.interp) so that every
+  scan is paired with the command that was actually issued at that time,
+  regardless of topic publish rates.  Without this, pairing the i-th scan with
+  the i-th command (different topics, different Hz) produces severe temporal
+  misalignment that causes the trained model to react late.
+* Dataset augmentation: horizontal mirror (reverse scan, negate steering) then
+  turn/straight undersampling to prevent the model from learning "go straight".
+"""
+
 import os
 import time
-import csv
-import subprocess
-import numpy as np
-import tensorflow as tf
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
+import numpy as np
+import tensorflow as tf
 from sklearn.utils import shuffle
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import (BatchNormalization, TimeDistributed, Conv1D,
-                                     MaxPooling1D, Flatten, LSTM, Dense, Dropout)
-from tensorflow.keras.optimizers import Adam
 
-from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
-from rclpy.serialization import deserialize_message
-from sensor_msgs.msg import LaserScan
-from ackermann_msgs.msg import AckermannDriveStamped
-# from nav_msgs.msg import Odometry  # optional
+from tln_variants.utils import read_ros2_bag
 
-# ========================================================
-# Config / Reproducibility
-# ========================================================
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
+
 SEED = 42
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
-# Uncomment to force CPU:
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-gpu_available = len(tf.config.list_physical_devices('GPU')) > 0
-print('GPU AVAILABLE:', gpu_available)
+# ── Configuration ─────────────────────────────────────────────────────────────
 
-# Folders
-MODEL_DIR = "./Models"
-FIG_DIR = "./Figures"
-os.makedirs(MODEL_DIR, exist_ok=True)
-os.makedirs(FIG_DIR, exist_ok=True)
+@dataclass
+class Config:
+    # Input bags
+    bag_paths: List[str] = field(default_factory=lambda: [
+        'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+        'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+        'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3',
+    ])
 
-# Training params
-MODEL_NAME = "TLN_temporal_compact"
-LOSS_FIG_PATH = os.path.join(FIG_DIR, "loss_curve.png")
-LR = 5e-5
-BATCH_SIZE = 64
-EPOCHS = 20
-HZ = 40               # used only by (optional) TFLite eval
-DOWNSAMPLE = 2        # lidar downsample factor
-# temporal indices: now, ~1.55s, ~3.1s ago at 40 Hz
-# (t, t-62, t-125). We’ll build forward indices to keep code simple: (i, i+62, i+125)
-OFFSET1 = 62
-OFFSET2 = 125
+    # Output paths
+    model_dir:  str = './Models'
+    fig_dir:    str = './Figures'
+    model_name: str = 'TLN_temporal_compact'
 
-# ========================================================
-# Utils
-# ========================================================
-def linear_map(x, x_min, x_max, y_min, y_max):
-    """Linear mapping with safe handling when x_min==x_max."""
-    denom = (x_max - x_min)
-    if denom == 0:
-        return np.full_like(x, (y_min + y_max) / 2.0)
-    return (x - x_min) / denom * (y_max - y_min) + y_min
+    # Training hyper-parameters
+    lr:          float = 5e-5
+    batch_size:  int   = 64
+    epochs:      int   = 20
+    train_ratio: float = 0.85
+    patience:    int   = 5
 
-def huber_loss_np(y_true, y_pred, delta=1.0):
-    error = np.abs(y_true - y_pred)
-    loss = np.where(error <= delta, 0.5 * error**2, delta * (error - 0.5 * delta))
-    return np.mean(loss)
+    # LiDAR pre-processing
+    lidar_downsample: int = 2   # keep every Nth range value
 
-def read_ros2_bag(bag_path, downsample=2):
-    storage_opts = StorageOptions(uri=bag_path, storage_id='sqlite3')
-    conv_opts = ConverterOptions(input_serialization_format='', output_serialization_format='')
-    reader = SequentialReader()
-    reader.open(storage_opts, conv_opts)
+    # Temporal context (frames back at ~40 Hz)
+    offset1: int = 30           # ~0.75 s ago
+    offset2: int = 60           # ~1.50 s ago
 
-    lidar_data, servo_data, speed_data, timestamps = [], [], [], []
+    # Dataset balancing
+    turn_threshold: float = 0.05  # |steering| above this → "turning" sample
 
-    while reader.has_next():
-        topic, serialized_msg, t_ns = reader.read_next()
-        t = t_ns * 1e-9
 
-        if topic in ('scan', 'Lidar'):
-            msg = deserialize_message(serialized_msg, LaserScan)
-            cleaned = np.nan_to_num(np.array(msg.ranges, dtype=np.float32),
-                                    posinf=0.0, neginf=0.0)
-            if downsample and downsample > 1:
-                cleaned = cleaned[::downsample]
-            lidar_data.append(cleaned)
-            timestamps.append(t)
-        elif topic in ('drive', 'Ackermann'):
-            msg = deserialize_message(serialized_msg, AckermannDriveStamped)
-            servo_data.append(float(msg.drive.steering_angle))
-            speed_data.append(float(msg.drive.speed))
-        # elif topic == 'odom':
-        #     msg = deserialize_message(serialized_msg, Odometry)
-        #     servo_data.append(float(msg.twist.twist.angular.z))
-        #     speed_data.append(float(msg.twist.twist.linear.x))
+# ── Data loading ──────────────────────────────────────────────────────────────
 
-    return np.array(lidar_data, dtype=np.float32), \
-           np.array(servo_data, dtype=np.float32), \
-           np.array(speed_data, dtype=np.float32), \
-           np.array(timestamps, dtype=np.float64)
+def load_bags(
+    bag_paths:  List[str],
+    downsample: int = 2,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load and concatenate multiple bags."""
+    lidar_list, steer_list, speed_list = [], [], []
+    for path in bag_paths:
+        lidar, steer, speed, _ = read_ros2_bag(path, downsample)
+        print(f'  {len(lidar):>6,} scans  ←  {path}')
+        lidar_list.append(lidar)
+        steer_list.append(steer)
+        speed_list.append(speed)
+    return (np.concatenate(lidar_list, axis=0),
+            np.concatenate(steer_list, axis=0),
+            np.concatenate(speed_list, axis=0))
 
-# If scans can vary in length, pad/trim them to a fixed size:
-# def pad_or_trim(arrs, target_len):
-#     out = []
-#     for a in arrs:
-#         if len(a) >= target_len:
-#             out.append(a[:target_len])
-#         else:
-#             pad = np.zeros(target_len, dtype=a.dtype)
-#             pad[:len(a)] = a
-#             out.append(pad)
-#     return np.stack(out, axis=0)
 
-def build_temporal_triplets(x_seq, y_seq, offsets=(OFFSET1, OFFSET2)):
+# ── Temporal triplets ─────────────────────────────────────────────────────────
+
+def build_temporal_triplets(
+    lidar:   np.ndarray,  # (N, L)
+    labels:  np.ndarray,  # (N, 2)
+    offset1: int,
+    offset2: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Stack 3-frame sequences ordered oldest → newest.
+
+    For timestep t:
+        X[t] = [scan(t-offset2), scan(t-offset1), scan(t)]
+        Y[t] = labels(t)
+
+    Shape: X (M, 3, L, 1),  Y (M, 2)
     """
-    Build sequences of shape (N', 3, L) aligned to y at t (current frame).
-    We construct [x[i], x[i+o1], x[i+o2]] and target y[i+o2] so inputs and targets align.
+    t_idx = np.arange(offset2, len(lidar))
+    X = np.stack([
+        lidar[t_idx - offset2],   # oldest context
+        lidar[t_idx - offset1],   # mid context
+        lidar[t_idx],             # current scan
+    ], axis=1)                    # (M, 3, L)
+    X = np.expand_dims(X, axis=-1)  # (M, 3, L, 1)
+    Y = labels[t_idx]               # (M, 2)
+    return X.astype(np.float32), Y.astype(np.float32)
+
+
+# ── Dataset augmentation ──────────────────────────────────────────────────────
+
+def mirror_dataset(
+    X: np.ndarray,  # (N, 3, L, 1)
+    Y: np.ndarray,  # (N, 2) – [steering, speed]
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Horizontal mirror augmentation: reverse scan order, negate steering.
+
+    Reversing the LiDAR array is equivalent to reflecting the scene left↔right.
+    The correct response in the mirrored scene is the negated steering angle;
+    speed is unchanged.  Returns original + mirrored samples concatenated.
     """
-    o1, o2 = offsets
-    N = len(x_seq)
-    max_i = N - o2
-    X_triplets = []
-    y_aligned = []
-    for i in range(max_i):
-        X_triplets.append([x_seq[i], x_seq[i+o1], x_seq[i+o2]])
-        y_aligned.append(y_seq[i+o2])
-    X_triplets = np.array(X_triplets, dtype=np.float32)     # (N', 3, L)
-    y_aligned = np.array(y_aligned, dtype=np.float32)       # (N', 2)
-    # add channel dim for Conv1D: (N', 3, L, 1)
-    X_triplets = np.expand_dims(X_triplets, axis=-1)
-    return X_triplets, y_aligned
+    X_mirror      = X[:, :, ::-1, :]   # flip scan left↔right across all 3 frames
+    Y_mirror      = Y.copy()
+    Y_mirror[:, 0] *= -1               # negate steering
 
-# ========================================================
-# Load Dataset (bags)
-# ========================================================
-bag_paths = [
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_1lap/test_map_1lap.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_obstr/test_map_obstr.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_GLC_smile_PP_edgecases/Forza_GLC_smile_PP_edgecases_0.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr1db3/jfr1.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfr2db3/jfr2.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv5_opp/jfrv5_opp.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/Forza_dataset/jfrv6_opp/jfrv6_opp.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv6_nonobstr_edited/JFRv6_nonobstr_edited.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv5-6_nonobstr/JFRv5_nonobstr_edited/JFRv5_nonobstr_edited.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/test_map_nonobstr_obstr_norm/test_map_non_obstr/test_map_non_obstr.db3',
-    '/home/jackson/sim_ws/src/tln_variants/train/Dataset/JFRv6_1lap/JFRv6_1lap.db3',
-]
+    return (np.concatenate([X, X_mirror], axis=0),
+            np.concatenate([Y, Y_mirror], axis=0))
 
-lidar_all, servo_all, speed_all = [], [], []
 
-for p in bag_paths:
-    l, s, sp, _ = read_ros2_bag(p, downsample=DOWNSAMPLE)
-    print(f'Loaded {len(l)} scans from {p}')
-    # Basic sanity: ensure we have same length among l/s/sp if they are sampled differently
-    N = min(len(l), len(s), len(sp))
-    if N == 0:
-        continue
-    lidar_all.append(l[:N])
-    servo_all.append(s[:N])
-    speed_all.append(sp[:N])
+def balance_turn_straight(
+    X:               np.ndarray,
+    Y:               np.ndarray,
+    turn_threshold:  float = 0.05,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Undersample the majority class so turns and straights are equal in count.
 
-if not lidar_all:
-    raise RuntimeError("No data loaded. Check bag paths and topics.")
+    Straight: |steering| <= turn_threshold
+    Turning:  |steering| >  turn_threshold
+    """
+    rng = np.random.default_rng(SEED)
 
-lidar_all = np.concatenate(lidar_all, axis=0)
-servo_all = np.concatenate(servo_all, axis=0)
-speed_all = np.concatenate(speed_all, axis=0)
+    steering      = Y[:, 0]
+    turn_mask     = np.abs(steering) > turn_threshold
+    n_turn        = int(turn_mask.sum())
+    n_straight    = int((~turn_mask).sum())
+    target        = min(n_turn, n_straight)
 
-# ========================================================
-# Shuffle & Split
-# ========================================================
-# Pack labels (servo, speed) together for shuffling in sync
-labels_all = np.stack([servo_all, speed_all], axis=1)  # (N, 2)
+    if target == 0:
+        print('  Balance: one class is empty — skipping.')
+        return X, Y
 
-L = lidar_all.shape[1]
-print(f'num_lidar_range_values: {L}')
+    turn_idx     = np.where( turn_mask)[0]
+    straight_idx = np.where(~turn_mask)[0]
+    sel = np.concatenate([
+        rng.choice(turn_idx,     target, replace=False),
+        rng.choice(straight_idx, target, replace=False),
+    ])
+    discarded = len(X) - 2 * target
+    print(f'  Balance: {n_turn} turn + {n_straight} straight '
+          f'→ {target} each  ({discarded} discarded)')
+    return X[sel], Y[sel]
 
-lidar_shuf, labels_shuf = shuffle(lidar_all, labels_all, random_state=SEED)
 
-train_ratio = 0.85
-N_total = len(lidar_shuf)
-N_train = int(train_ratio * N_total)
+# ── Speed scaling ─────────────────────────────────────────────────────────────
 
-x_train_1d = lidar_shuf[:N_train]     # (N_train, L)
-y_train_raw = labels_shuf[:N_train]   # (N_train, 2)
-x_test_1d  = lidar_shuf[N_train:]
-y_test_raw = labels_shuf[N_train:]
+def scale_speed(
+    y_train: np.ndarray,
+    y_test:  np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    """Normalise the speed column (index 1) to [0, 1] using training stats."""
+    s_min  = float(y_train[:, 1].min())
+    s_max  = float(y_train[:, 1].max())
+    denom  = (s_max - s_min) or 1.0
 
-# ========================================================
-# Scale speed to [0,1] using training stats only
-# ========================================================
-speed_min = np.min(y_train_raw[:,1])
-speed_max = np.max(y_train_raw[:,1])
-y_train = np.stack([y_train_raw[:,0],
-                    linear_map(y_train_raw[:,1], speed_min, speed_max, 0, 1)], axis=1)
-y_test  = np.stack([y_test_raw[:,0],
-                    linear_map(y_test_raw[:,1], speed_min, speed_max, 0, 1)], axis=1)
+    def _scale(y: np.ndarray) -> np.ndarray:
+        out        = y.copy()
+        out[:, 1]  = (y[:, 1] - s_min) / denom
+        return out
 
-print(f'Min_speed (train): {speed_min:.4f}')
-print(f'Max_speed (train): {speed_max:.4f}')
-print(f'Train shapes: x={x_train_1d.shape}, y={y_train.shape}')
-print(f'Test  shapes: x={x_test_1d.shape},  y={y_test.shape}')
+    return _scale(y_train), _scale(y_test), s_min, s_max
 
-# ========================================================
-# Build temporal triplets separately for train and test
-# ========================================================
-X_train, Y_train = build_temporal_triplets(x_train_1d, y_train, offsets=(OFFSET1, OFFSET2))
-X_test,  Y_test  = build_temporal_triplets(x_test_1d,  y_test,  offsets=(OFFSET1, OFFSET2))
 
-print(f'X_train: {X_train.shape} (N, 3, {L}, 1)')
-print(f'Y_train: {Y_train.shape} (N, 2)')
-print(f'X_test : {X_test.shape}')
-print(f'Y_test : {Y_test.shape}')
+# ── Model ─────────────────────────────────────────────────────────────────────
 
-# Final input shape for Keras
-input_shape = (3, L, 1)
+def build_model(input_shape: Tuple[int, int, int]) -> tf.keras.Model:
+    """2-D Conv model operating over a (time_steps=3, lidar_length, 1) input."""
+    return tf.keras.Sequential([
+        # Per-scan feature extraction (kernel height=1 → independent per timestep)
+        tf.keras.layers.Conv2D(24, (1, 10), strides=(1, 4), activation='relu',
+                               input_shape=input_shape),
+        tf.keras.layers.BatchNormalization(),
 
-# ========================================================
-# Model (compact Conv1D + stacked LSTMs with dropout)
-# ========================================================
-model = Sequential(name="tln_temporal_compact")
-model.add(BatchNormalization(input_shape=input_shape))
+        tf.keras.layers.Conv2D(36, (1, 5), strides=(1, 2), activation='relu'),
+        tf.keras.layers.BatchNormalization(),
 
-# Spatial feature extractor per frame
-model.add(TimeDistributed(Conv1D(16, kernel_size=5, activation='relu', padding='same')))
-model.add(TimeDistributed(MaxPooling1D(pool_size=2)))
-model.add(TimeDistributed(Conv1D(32, kernel_size=3, activation='relu', padding='same')))
-model.add(TimeDistributed(MaxPooling1D(pool_size=2)))
-model.add(TimeDistributed(Flatten()))
+        tf.keras.layers.Conv2D(48, (1, 5), strides=(1, 2), activation='relu'),
+        tf.keras.layers.BatchNormalization(),
 
-# Temporal modeling
-model.add(LSTM(64, return_sequences=True, dropout=0.2, recurrent_dropout=0.2))
-model.add(LSTM(64, return_sequences=True, dropout=0.2, recurrent_dropout=0.2))
-model.add(LSTM(32, dropout=0.2, recurrent_dropout=0.2))
+        # Cross-timestep fusion (kernel height=3 spans all 3 frames)
+        tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+        tf.keras.layers.BatchNormalization(),
 
-# Regression head (servo, speed)
-model.add(Dense(2, activation='linear'))
+        tf.keras.layers.Conv2D(64, (1, 3), activation='relu'),
+        tf.keras.layers.Flatten(),
 
-optimizer = Adam(learning_rate=LR)
-model.compile(optimizer=optimizer, loss='huber')  # same as your setup
-model.summary(print_fn=lambda s: print(s))
+        tf.keras.layers.Dense(100, activation='relu'),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(50, activation='relu'),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(10, activation='relu'),
+        tf.keras.layers.Dense(2, activation='tanh'),
+    ], name='TLN_temporal')
 
-# ========================================================
-# Train
-# ========================================================
-t0 = time.time()
-history = model.fit(
-    X_train, Y_train,
-    epochs=EPOCHS,
-    batch_size=BATCH_SIZE,
-    validation_data=(X_test, Y_test),
-    verbose=1
-)
-print(f'=============> {int(time.time() - t0)} seconds <=============')
 
-# Plot training/validation loss
-plt.figure()
-plt.plot(history.history['loss'], label='Train')
-plt.plot(history.history['val_loss'], label='Val')
-plt.title('Model Loss')
-plt.ylabel('Loss')
-plt.xlabel('Epoch')
-plt.legend(loc='upper right')
-plt.savefig(LOSS_FIG_PATH, dpi=150, bbox_inches='tight')
-plt.close()
-print(f"Saved loss curve to {LOSS_FIG_PATH}")
+# ── Evaluation helpers ────────────────────────────────────────────────────────
 
-# ========================================================
-# Evaluate
-# ========================================================
-print("\n==========================================")
-print("Model Evaluation")
-print("==========================================")
-test_loss = model.evaluate(X_test, Y_test, verbose=0)
-print(f'Overall Test Loss (Keras Huber) = {test_loss:.6f}')
+def huber_loss_np(y_true: np.ndarray, y_pred: np.ndarray, delta: float = 1.0) -> float:
+    err = np.abs(y_true - y_pred)
+    return float(np.mean(np.where(err <= delta, 0.5 * err**2,
+                                  delta * (err - 0.5 * delta))))
 
-Y_pred = model.predict(X_test, verbose=0)
-overall_huber = huber_loss_np(Y_test, Y_pred)
-print(f'Overall Huber Loss (numpy): {overall_huber:.6f}')
 
-# Per-output diagnostics
-servo_huber = huber_loss_np(Y_test[:, 0], Y_pred[:, 0])
-speed_huber = huber_loss_np(Y_test[:, 1], Y_pred[:, 1])
-print(f"Servo   Huber: {servo_huber:.6f}")
-print(f"Speed   Huber: {speed_huber:.6f}")
+def save_loss_curve(history: tf.keras.callbacks.History, path: str) -> None:
+    plt.figure()
+    plt.plot(history.history['loss'],     label='Train')
+    plt.plot(history.history['val_loss'], label='Val')
+    plt.title('Model Loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(loc='upper right')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f'Loss curve  →  {path}')
 
-# ========================================================
-# Save TFLite (default + Select TF Ops to keep LSTM)
-# ========================================================
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
-converter.experimental_new_converter = True
-converter.target_spec.supported_ops = [
-    tf.lite.OpsSet.TFLITE_BUILTINS,
-    tf.lite.OpsSet.SELECT_TF_OPS
-]
-tflite_model = converter.convert()
-tflite_path = os.path.join(MODEL_DIR, f"{MODEL_NAME}_noquantized.tflite")
-with open(tflite_path, 'wb') as f:
-    f.write(tflite_model)
-print(f"Saved: {tflite_path}")
 
-# # Optional: INT8 full integer quantization (needs representative dataset)
-# rep_ds = tf.data.Dataset.from_tensor_slices(X_train.astype(np.float32)).batch(1)
-# def representative_data_gen():
-#     for x in rep_ds.take(500):
-#         yield [x]
-# converter.optimizations = [tf.lite.Optimize.DEFAULT]
-# converter.representative_dataset = representative_data_gen
-# converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-# converter.inference_input_type = tf.int8
-# converter.inference_output_type = tf.int8
-# quant_model = converter.convert()
-# quant_path = os.path.join(MODEL_DIR, f"{MODEL_NAME}_int8.tflite")
-# with open(quant_path, 'wb') as f:
-#     f.write(quant_model)
-# print(f"Saved: {quant_path}")
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-print("End")
+def main() -> None:
+    cfg = Config()
+    os.makedirs(cfg.model_dir, exist_ok=True)
+    os.makedirs(cfg.fig_dir,   exist_ok=True)
+
+    print('GPU available:', bool(tf.config.list_physical_devices('GPU')))
+
+    # ── Load ─────────────────────────────────────────────────────────────────
+    print('\nLoading bags …')
+    lidar, steer, speed = load_bags(cfg.bag_paths, downsample=cfg.lidar_downsample)
+    print(f'Total: {len(lidar):,} scans  |  scan length L={lidar.shape[1]}')
+
+    labels = np.stack([steer, speed], axis=1)   # (N, 2)
+
+    # ── Train / test split (preserve temporal order for triplet construction) ─
+    N_train          = int(cfg.train_ratio * len(lidar))
+    x_tr, y_tr_raw   = lidar[:N_train],  labels[:N_train]
+    x_te, y_te_raw   = lidar[N_train:],  labels[N_train:]
+
+    y_tr, y_te, s_min, s_max = scale_speed(y_tr_raw, y_te_raw)
+    print(f'Speed range (train): [{s_min:.4f}, {s_max:.4f}]')
+
+    # ── Build temporal triplets ───────────────────────────────────────────────
+    print('\nBuilding temporal triplets …')
+    X_tr, Y_tr = build_temporal_triplets(x_tr, y_tr, cfg.offset1, cfg.offset2)
+    X_te, Y_te = build_temporal_triplets(x_te, y_te, cfg.offset1, cfg.offset2)
+    print(f'  Train: {X_tr.shape}   Test: {X_te.shape}')
+
+    # ── Augmentation (training only) ─────────────────────────────────────────
+    print('\nApplying mirror augmentation …')
+    X_tr, Y_tr = mirror_dataset(X_tr, Y_tr)
+    print(f'  After mirror: {X_tr.shape}')
+
+    print('\nBalancing turn / straight …')
+    X_tr, Y_tr = balance_turn_straight(X_tr, Y_tr, cfg.turn_threshold)
+
+    X_tr, Y_tr = shuffle(X_tr, Y_tr, random_state=SEED)
+    X_te, Y_te = shuffle(X_te, Y_te, random_state=SEED)
+    print(f'\nFinal  train: {X_tr.shape}   test: {X_te.shape}')
+
+    # ── Build & compile ───────────────────────────────────────────────────────
+    model = build_model(input_shape=X_tr.shape[1:])   # (3, L, 1)
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(cfg.lr),
+        loss=tf.keras.losses.Huber(),
+    )
+    model.summary()
+
+    # ── Train ─────────────────────────────────────────────────────────────────
+    t0 = time.time()
+    history = model.fit(
+        X_tr, Y_tr,
+        epochs=cfg.epochs,
+        batch_size=cfg.batch_size,
+        validation_data=(X_te, Y_te),
+        callbacks=[tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss',
+            patience=cfg.patience,
+            restore_best_weights=True,
+        )],
+        verbose=1,
+    )
+    print(f'\nTraining time: {int(time.time() - t0)} s')
+
+    save_loss_curve(history, os.path.join(cfg.fig_dir, 'loss_curve.png'))
+
+    # ── Evaluate ──────────────────────────────────────────────────────────────
+    print('\n── Evaluation ───────────────────────────────────────────────────')
+    print(f'Test loss (Keras Huber): {model.evaluate(X_te, Y_te, verbose=0):.6f}')
+
+    Y_pred = model.predict(X_te, verbose=0)
+    print(f'Steering Huber: {huber_loss_np(Y_te[:, 0], Y_pred[:, 0]):.6f}')
+    print(f'Speed    Huber: {huber_loss_np(Y_te[:, 1], Y_pred[:, 1]):.6f}')
+
+    # ── Export TFLite ─────────────────────────────────────────────────────────
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    converter.optimizations              = [tf.lite.Optimize.DEFAULT]
+    converter.experimental_new_converter = True
+    converter.target_spec.supported_ops  = [
+        tf.lite.OpsSet.TFLITE_BUILTINS,
+        tf.lite.OpsSet.SELECT_TF_OPS,
+    ]
+    tflite_path = os.path.join(cfg.model_dir, f'{cfg.model_name}_noquantized.tflite')
+    with open(tflite_path, 'wb') as f:
+        f.write(converter.convert())
+    print(f'\nSaved TFLite model  →  {tflite_path}')
+
+
+if __name__ == '__main__':
+    main()

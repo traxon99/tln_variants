@@ -30,14 +30,9 @@ from ackermann_msgs.msg import AckermannDriveStamped
 #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_oval_12_4_25/lab_oval_12_4_25.db3',
 #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3',
 # ]
-    
-def find_db3_files(directory):
-    db3_files = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith('.db3'):
-                db3_files.append(os.path.join(root, file))
-    return db3_files
+
+from tln_variants.utils import find_db3_files
+
 
 # TLN Standard
 bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/TLN_Original_Dataset')

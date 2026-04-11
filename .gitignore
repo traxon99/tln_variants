@@ -8,3 +8,4 @@ train/Models/lidar_imitation_model_loss.png
 #ignore all plots and metrics.txt in data_eval
 data_eval/plots/**
 data_eval/metrics.txt
+tln_variants.egg-info/**
