@@ -11,10 +11,11 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from sensor_msgs.msg import Joy
+from tln_variants.node_utils import linear_map, preprocess_scan, EXP_MAP_ALPHA
 
 TLN_M = False
 
-class TLNStandard(Node):
+class TLNStandardNode(Node):
     def __init__(self):
         super().__init__('tln_standard')
 
@@ -42,7 +43,7 @@ class TLNStandard(Node):
         self.launch = False
         self.launching = False
 
-        self.speed_mappings = [self.linear_map, self.exp_map_abs]
+        self.speed_mappings = [linear_map, self.exp_map_abs]
         self.speed_map = self.speed_mappings[0]
 
 
@@ -73,19 +74,11 @@ class TLNStandard(Node):
         if not self.sim:
             self.get_logger().warn('Press right bumper to activate.')
 
-    # Utility functions
-    
     def ns_2_s(self, ns):
-        #nanoseconds to seconds
         return ns / 1_000_000_000
 
-    def linear_map(self, x, x_min, x_max, y_min, y_max):
-        #linear map from x to y
-        return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
-    
-    
     def exp_map_abs(self, z, x_min, x_max, vmin, vmax):
-        alpha=3.0
+        alpha = EXP_MAP_ALPHA
         # Map NN output z (expected in [0,1]) to [vmin,vmax] using exponential curve.
         # alpha > 0 controls curvature: higher alpha = more bias toward low speeds.
 
@@ -165,29 +158,14 @@ class TLNStandard(Node):
         # Scan callback from /scan topic. Called every time /scan receives a message
         
         # Only process scans when going
-        if self.go or self.sim:  
-            
-            #convert to np array
-            scans = np.array(msg.ranges)
-            
-            # Account for weird size issue with TLN M
+        if self.go or self.sim:
+            raw = list(msg.ranges)
             if TLN_M:
-                scans = np.append(scans, [20]) #Only for Original TLN (541 scans)
-            
-                        
-            # Add noise only in simulation to improve sim-to-real transfer
-            if self.sim:
-                noise = np.random.normal(0, 0.5, scans.shape)
-                scans = scans + noise
-            
-            #Clip values beyond 10m
-            scans[scans > 10] = 10
-            
-            # Use every other value
-            scans = scans[::self.downscale_factor]
-            
-            scans = np.expand_dims(scans, axis=-1).astype(np.float32)
-            scans = np.expand_dims(scans, axis=0)
+                raw = raw + [20.0]  # model-specific size adjustment
+            num_ranges = len(raw) // self.downscale_factor
+            scans = preprocess_scan(raw, num_ranges, add_noise=self.sim)
+            scans = np.expand_dims(scans, axis=-1)  # (N, 1)
+            scans = np.expand_dims(scans, axis=0)   # (1, N, 1)
 
             # Store scan in self.scan 
             self.scan = scans
@@ -238,7 +216,7 @@ def main(args=None):
     # Init ROS2
     rclpy.init(args=args)
     # Create TLN Node
-    node = TLNStandard()
+    node = TLNStandardNode()
     
     # Spin, look for interrupts
     try:

@@ -8,11 +8,9 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from collections import deque
 from nav_msgs.msg import Odometry
+from tln_variants.node_utils import linear_map, preprocess_scan
 
-#For average speed
-min_max = (0,0)
-
-class TLNStandard(Node):
+class TLNVelNode(Node):
     def __init__(self):
         super().__init__('tln_vel')
         self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
@@ -44,19 +42,11 @@ class TLNStandard(Node):
 
         
 
-    def linear_map(self, x, x_min, x_max, y_min, y_max):
-        return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
-
     def scan_callback(self, msg):
-        scans = np.array(msg.ranges)
-        # scans = np.append(scans, [20])
-        self.get_logger().info(f'num scans:{len(scans)}')
-        noise = np.random.normal(0, 0.5, scans.shape)
-        scans = scans + noise
-        scans[scans > 10] = 10
-        # scans = scans[::2]  # Use every other value
-        scans = np.expand_dims(scans, axis=-1).astype(np.float32)
-        scans = np.expand_dims(scans, axis=0)
+        num_ranges = len(msg.ranges)
+        scans = preprocess_scan(msg.ranges, num_ranges, add_noise=True)
+        scans = np.expand_dims(scans, axis=-1)  # (N, 1)
+        scans = np.expand_dims(scans, axis=0)   # (1, N, 1)
 
         self.interpreter.set_tensor(self.scan_input_index, scans)
         self.interpreter.set_tensor(self.velocity_input_index, np.float32(self.velocity))
@@ -72,7 +62,7 @@ class TLNStandard(Node):
 
         min_speed = 1
         max_speed = 13
-        speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
+        speed = linear_map(speed, 0, 1, min_speed, max_speed)
         self.speed_vals = np.append(self.speed_vals, speed)
         
         self.speed_queue.append(speed)
@@ -113,7 +103,7 @@ class TLNStandard(Node):
 def main(args=None):
 
     rclpy.init(args=args)
-    node = TLNStandard()
+    node = TLNVelNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

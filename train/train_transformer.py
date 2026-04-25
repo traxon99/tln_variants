@@ -1,3 +1,8 @@
+# INCOMPLETE: This is an architecture fragment only.
+# Variables such as `lidar`, `lr`, and `custom_loss` are expected to be defined
+# by a surrounding training script before this code can be used.
+# Do not run this file directly — integrate it into a full training pipeline first.
+#
 # -------------------------
 # Transformer-based model
 # -------------------------

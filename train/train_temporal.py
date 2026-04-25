@@ -131,18 +131,16 @@ lidar_data = np.array(lidar_data)
 servo_data = np.array(servo_data)
 speed_data = np.array(speed_data)
 
-# # Shuffle data
-# shuffled_data = shuffle(np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1), random_state=62)
-# shuffled_lidar_data = shuffle(lidar_data, random_state=62)
+# Temporal models need consecutive frames — do not shuffle before building windows.
+# Split sequentially to preserve temporal order.
+combined_data = np.concatenate((servo_data[:, np.newaxis], speed_data[:, np.newaxis]), axis=1)
 
-# Split data into train and test sets
 train_ratio = 0.85
-train_samples = int(train_ratio * len(shuffled_lidar_data))
-x_train_bag, x_test_bag = shuffled_lidar_data[:train_samples], shuffled_lidar_data[train_samples:]
+train_samples = int(train_ratio * len(lidar_data))
+x_train_bag, x_test_bag = lidar_data[:train_samples], lidar_data[train_samples:]
 
-# Extract servo and speed values
-y_train_bag = shuffled_data[:train_samples]
-y_test_bag = shuffled_data[train_samples:]
+y_train_bag = combined_data[:train_samples]
+y_test_bag = combined_data[train_samples:]
 
 # Extend lists with train and test data
 lidar.extend(x_train_bag)
@@ -203,15 +201,28 @@ oldlidar = tf.stack([[i, i, i] for i in lidar])
 oldtest_lidar = tf.stack([[i, i, i] for i in test_lidar])
 newlidar = []
 
-#i, i+62, i+125 represent t, t-5, t-10 
+# i, i+62, i+125 represent t, t-5, t-10 (frames at ~40 Hz: 0s, 1.5s, 3.1s back)
+OFFSET1 = 62
+OFFSET2 = 125
 try:
-    for i in range(len(lidar)-125):
-        newlidar.append([lidar[i], lidar[i+62], lidar[i+125]])
-except:
+    for i in range(len(lidar) - OFFSET2):
+        newlidar.append([lidar[i], lidar[i + OFFSET1], lidar[i + OFFSET2]])
+except Exception:
     raise ValueError("Wrong timesteps.")
 newlidar = tf.stack(newlidar)
 lidar = newlidar
-test_lidar = newlidar
+
+# Build test temporal windows separately — never use training windows for validation
+new_test_lidar = []
+try:
+    for i in range(len(test_lidar) - OFFSET2):
+        new_test_lidar.append([test_lidar[i], test_lidar[i + OFFSET1], test_lidar[i + OFFSET2]])
+except Exception:
+    raise ValueError("Wrong timesteps in test set.")
+test_lidar = tf.stack(new_test_lidar)
+# Trim labels to match the reduced test set length
+test_servo = test_servo[OFFSET2:]
+test_speed = test_speed[OFFSET2:]
 
 model = tf.keras.Sequential([
     tf.keras.layers.BatchNormalization(epsilon=0.001, axis=-1, input_shape=(3, num_lidar_range_values, 1)),
@@ -240,10 +251,10 @@ print(model.summary())
 # Model Fit
 #======================================================
 start_time = time.time()
-ydata = np.concatenate((servo[:, np.newaxis], speed[:, np.newaxis]), axis=1)[125:]
-test_data = ydata
+ydata = np.concatenate((servo[:, np.newaxis], speed[:, np.newaxis]), axis=1)[OFFSET2:]
+test_data = np.concatenate((test_servo[:, np.newaxis], test_speed[:, np.newaxis]), axis=1)
 history = model.fit(lidar, ydata,
-                    epochs=num_epochs, batch_size=batch_size, validation_data=(test_lidar, test_data),)
+                    epochs=num_epochs, batch_size=batch_size, validation_data=(test_lidar, test_data))
 
 print(f'=============>{int(time.time() - start_time)} seconds<=============')
 

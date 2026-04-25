@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
+import sys
 import time
-import warnings
 import numpy as np
 import tensorflow as tf
 import matplotlib
@@ -9,12 +9,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.utils import shuffle
 
-# ROS 2 bag imports
-from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
-from rclpy.serialization import deserialize_message
-from sensor_msgs.msg import LaserScan
-from ackermann_msgs.msg import AckermannDriveStamped
-from nav_msgs.msg import Odometry
+sys.path.insert(0, os.path.dirname(__file__))
+from train_utils import read_ros2_bag
+
 
 # Keras model imports
 from tensorflow.keras.layers import (
@@ -23,88 +20,6 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
-
-#========================================================
-# Utility functions (from your first block)
-#========================================================
-def linear_map(x, x_min, x_max, y_min, y_max):
-    return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
-
-def read_ros2_bag(bag_path):
-    """
-    Reads a ROS 2 bag via rosbag2_py and returns
-    lidar scans, steering (angular.z), speeds (linear.x), and timestamps.
-    """
-    storage_opts = StorageOptions(uri=bag_path, storage_id='sqlite3')
-    conv_opts    = ConverterOptions(input_serialization_format='', output_serialization_format='')
-    reader = SequentialReader()
-    reader.open(storage_opts, conv_opts)
-
-    lidar_data, servo_data, speed_data, timestamps = [], [], [], []
-
-
-    while reader.has_next():
-        topic, serialized_msg, t_ns = reader.read_next()
-        # Convert nanoseconds to seconds
-        t = t_ns * 1e-9
-
-        # if topic == 'scan':
-        if topic == 'Lidar': #TLN orig
-            msg = deserialize_message(serialized_msg, LaserScan)
-            cleaned = np.nan_to_num(msg.ranges, posinf=0.0, neginf=0.0)
-            lidar_data.append(cleaned[::2])
-            timestamps.append(t)
-        elif topic == 'Ackermann': #TLN orig
-        # elif topic == 'drive':
-            msg = deserialize_message(serialized_msg, AckermannDriveStamped)
- 
-            data = msg.drive.steering_angle
-            s_data = msg.drive.speed
-            
-            servo_data.append(data)
-
-            speed_data.append(s_data)
-        # elif topic == 'odom':
-        #     msg = deserialize_message(serialized_msg, Odometry)
-        #     servo_data.append(msg.twist.twist.angular.z)
-        #     speed_data.append(msg.twist.twist.linear.x)
-        #     # align timestamp for control measurements too
-        #     # (you can choose to append t here or ignore if you only need LIDAR dt)
-        #     # timestamps.append(t)
-
-    return (
-        np.array(lidar_data),
-        np.array(servo_data),
-        np.array(speed_data),
-        np.array(timestamps)
-    )
-
-    ## Data Imbalance Stuff
-
-    # #make all data lists into np arrays
-
-    # lidar_data_arr = np.array(lidar_data)
-    # servo_data_arr = np.array(servo_data)
-    # speed_data_arr = np.array(speed_data)
-    # timestamps_arr = np.array(timestamps)
-    # print(np.flip(lidar_data_arr).shape)
-    # # adding flipped data to balance out right and left turn differences
-    
-    # final_lidar_data = np.concatenate([lidar_data_arr, np.flip(lidar_data_arr, axis=1)], axis=0)    
-    # final_servo_data = np.concatenate([servo_data_arr, np.negative(servo_data_arr)], axis=0)
-    # final_speed_data = np.concatenate([speed_data_arr, speed_data_arr], axis=0)
-    # final_timestamps = np.concatenate([timestamps_arr, timestamps_arr], axis=0)
-    # print(final_lidar_data.shape)
-    # print(final_servo_data.shape)
-    # print(final_speed_data.shape)
-    # print(final_timestamps.shape)
-
-    # return (
-    #     final_lidar_data,
-    #     final_servo_data,
-    #     final_speed_data,
-    #     final_timestamps
-    # )
 
 #========================================================
 # Sequence builder (unchanged)
@@ -207,7 +122,7 @@ if __name__ == '__main__':
 
     # Normalize speed 0→1
     min_s, max_s = all_speed.min(), all_speed.max()
-    all_speed = linear_map(all_speed, min_s, max_s, 0, 1)
+    all_speed = (all_speed - min_s) / (max_s - min_s)
 
     # Build sequences
     X, y = create_lidar_sequences(all_lidar, all_servo, all_speed, all_ts, seq_len)

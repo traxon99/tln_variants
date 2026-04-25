@@ -2,14 +2,12 @@ import rclpy
 import numpy as np
 import time
 import tensorflow as tf
+from collections import deque
 from rclpy.node import Node
 from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
-
-
-#For average speed
-min_max = (0,0)
+from tln_variants.node_utils import linear_map, preprocess_scan
 
 class RLNSim(Node):
     def __init__(self):
@@ -25,13 +23,9 @@ class RLNSim(Node):
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
         self.output_details = self.interpreter.get_output_details()
-        self.scan_buffer = np.zeros((2, 20))
-
         self.scans = [[] for i in range(5)]
+        self.scan_ts = deque(maxlen=5)
 
-
-    def linear_map(self, x, x_min, x_max, y_min, y_max):
-        return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min    
 
     def scan_callback(self, msg):
         scans = np.array(msg.ranges)[::2]
@@ -39,15 +33,26 @@ class RLNSim(Node):
 
         noise = np.random.normal(0, 0.5, scans.shape)
         scans = scans + noise
-        
-        scans = np.array(scans)
-        scans[scans>10] = 10
+        scans[scans > 10] = 10
 
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         self.scans.pop(0)
         self.scans.append(scans)
+        self.scan_ts.append(t)
         if self.scans[0] == []:
-            return 0.0, 0.0
-        scans = np.stack([self.scans, [[i*0.025]*len(scans) for i in range(5)]], axis=-1)
+            return
+
+        # Build real ΔT channel from ROS header timestamps
+        ts_arr = np.array(self.scan_ts, dtype=np.float32)
+        if len(ts_arr) == 5 and np.all(np.diff(ts_arr) >= 0):
+            diffs = np.diff(ts_arr)
+        else:
+            diffs = np.ones(4, dtype=np.float32) * 0.025  # fallback: 40 Hz
+        dt_full = np.zeros(5, dtype=np.float32)
+        dt_full[1:] = diffs
+        dt_tiled = np.tile(dt_full[:, None], (1, len(scans)))
+
+        scans = np.stack([self.scans, dt_tiled], axis=-1)
         scans = np.expand_dims(scans, axis=0).astype(np.float32)
         self.interpreter.set_tensor(self.input_index, scans)
         
@@ -61,35 +66,8 @@ class RLNSim(Node):
         speed = output[0,1]
         min_speed = 1
         max_speed = 8
-        speed = self.linear_map(speed, 0, 1, min_speed, max_speed) 
+        speed = linear_map(speed, 0, 1, min_speed, max_speed)
         self.publish_ackermann_drive(speed, steer)
-
-        # scans = np.array(msg.ranges)
-        # scans = np.append(scans, [20])
-        # self.get_logger().info(f'num scans:{len(scans)}')
-        # noise = np.random.normal(0, 0.5, scans.shape)
-        # scans = scans + noise
-        # scans[scans > 10] = 10
-        # scans = scans[::2]  # Use every other value
-        # scans = np.expand_dims(scans, axis=-1).astype(np.float32)
-        # scans = np.expand_dims(scans, axis=0)
-
-
-        # self.interpreter.set_tensor(self.input_index, scans)
-        # start_time = time.time()
-        # self.interpreter.invoke()
-        # inf_time = (time.time() - start_time) * 1000  # in milliseconds
-        # self.get_logger().info(f'Inference time: {inf_time:.2f} ms')
-
-        # output = self.interpreter.get_tensor(self.output_index)
-        # steer = output[0, 0]
-        # speed = output[0, 1]
-
-        # min_speed = -0.5
-        # max_speed = 9
-        # speed = self.linear_map(speed, 0, 1, min_speed, max_speed)
-
-        # self.publish_ackermann_drive(speed, steer)
 
     def publish_ackermann_drive(self, speed, steering_angle):
         ackermann_msg = AckermannDriveStamped()

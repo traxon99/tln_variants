@@ -7,11 +7,12 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from collections import deque
 from nav_msgs.msg import Odometry
+from tln_variants.node_utils import linear_map, preprocess_scan
 
 
-class TLNStandard(Node):
+class TLNTemporalNode(Node):
     def __init__(self):
-        super().__init__('tln_standard')
+        super().__init__('tln_temporal')
         self.get_logger().info('TLN Node has been started.')
 
         # ROS interfaces
@@ -40,13 +41,9 @@ class TLNStandard(Node):
         # Debug flag
         self.debug = True
 
-    def linear_map(self, x, x_min, x_max, y_min, y_max):
-        return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
-
     def scan_callback(self, msg):
-        scans = np.array(msg.ranges[::2])
-        noise = np.random.normal(0, 0.5, scans.shape)
-        scans = np.clip(scans + noise, 0, 10)
+        num_ranges = len(msg.ranges) // 2
+        scans = preprocess_scan(msg.ranges, num_ranges, add_noise=True)
 
         self.scan = scans  # for crash detection
         self.scan_buffer.append(scans)
@@ -71,7 +68,7 @@ class TLNStandard(Node):
         raw_speed = output[0, 1]
         min_speed = 1
         max_speed = 8
-        speed = self.linear_map(raw_speed, 0, 1, min_speed, max_speed)
+        speed = linear_map(raw_speed, 0, 1, min_speed, max_speed)
         if not np.isfinite(speed) or not np.isfinite(steer):
             self.get_logger().warn("Invalid model output, skipping publish.")
             return
@@ -103,7 +100,7 @@ class TLNStandard(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = TLNStandard()
+    node = TLNTemporalNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -7,6 +7,7 @@ from threading import Lock
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from tln_variants.node_utils import linear_map as _linear_map, preprocess_scan, STEER_LIMIT, RLN_SPEED_OUT_MIN, RLN_SPEED_OUT_MAX
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
 
@@ -18,24 +19,17 @@ import matplotlib.pyplot as plt
 
 
 
-class AutonomousNode(Node):
-    def __init__(self):
+class RLNNode(Node):
+    def __init__(self, use_timestamps=True):
         super().__init__('autonomous_node')
+        self.use_timestamps = use_timestamps
 
         # Add a mutex for thread safety
         self.buffer_lock = Lock()
 
         # ——— Load the TFLite model ———
         try:
-            # model_path = os.path.join(
-            #     os.path.dirname(__file__),
-            #     '../models/RNN_Attn_Controller.tflite'
-            # )
-            # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RNN_15min_sim.tflite'
-            # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_with_TLN_data.tflite'
-            # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_TLN_M.tflite'
-            # model_path = '/home/jackson/sim_ws/src/tln_variants/models/RLN_GMP.tflite'
-            model_path='/home/jackson/sim_ws/src/tln_variants/train/Models/test.tflite'
+            model_path = '/home/jackson/sim_ws/src/tln_variants/train/Models/test.tflite'
             # Check if model file exists
             if not os.path.exists(model_path):
                 self.get_logger().error(f'Model file not found: {model_path}')
@@ -115,24 +109,10 @@ class AutonomousNode(Node):
 
     def lidar_callback(self, msg: LaserScan):
         try:
-            scans = np.array(msg.ranges)
-
-
-            #Add noise (FROM TLN)
-            noise = np.random.normal(0, 0.5, scans.shape)
-            scans = scans + noise
-            scans[scans > 10] = 10
-
-            
-            # Clean NaN/Inf and subsample to num_ranges points
-            cleaned = np.nan_to_num(scans, nan=0.0, posinf=0.0, neginf=0.0)
-            idx = np.linspace(0, len(cleaned)-1, self.num_ranges, dtype=int)
-            scan = cleaned[idx].astype(np.float32)
-
-            # Push scan + timestamp with thread safety
+            scan = preprocess_scan(msg.ranges, self.num_ranges, add_noise=True)
+            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             with self.buffer_lock:
                 self.buff_scans.append(scan)
-                t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
                 self.buff_ts.append(t)
         except Exception as e:
             self.get_logger().error(f'Error in lidar_callback: {e}')
@@ -180,29 +160,22 @@ class AutonomousNode(Node):
                 self.get_logger().warn('NaN or Inf values found in scans, replacing with zeros')
                 scans = np.nan_to_num(scans, nan=0.0, posinf=0.0, neginf=0.0)
 
-            # 2) Build Δt array
-            ts = np.array(ts_list, dtype=np.float32)  # length = seq_len
-            
-            # Check for timestamp issues
-            if not np.all(np.diff(ts) >= 0):
-                self.get_logger().warn('Non-monotonic timestamps detected')
-                # Fix by using constant small dt
-                diffs = np.ones(self.seq_len-1, dtype=np.float32) * 0.025  # 40Hz
+            if self.use_timestamps:
+                # 2) Build Δt array from real ROS timestamps
+                ts = np.array(ts_list, dtype=np.float32)
+                if not np.all(np.diff(ts) >= 0):
+                    self.get_logger().warn('Non-monotonic timestamps detected')
+                    diffs = np.ones(self.seq_len-1, dtype=np.float32) * 0.025  # 40Hz fallback
+                else:
+                    diffs = np.diff(ts)
+                dt_full = np.zeros(self.seq_len, dtype=np.float32)
+                dt_full[1:] = diffs
+                dt_tiled = np.repeat(dt_full[:, None], self.num_ranges, axis=1)
+                seq = np.stack([scans, dt_tiled], axis=2)
+                inp = seq[None, ...].astype(np.float32)
             else:
-                diffs = np.diff(ts)          # length = seq_len-1
-
-            # Pad to length seq_len by prepending a zero
-            dt_full = np.zeros(self.seq_len, dtype=np.float32)
-            dt_full[1:] = diffs
-
-            # 3) Tile Δt across ranges: (seq_len, num_ranges)
-            dt_tiled = np.repeat(dt_full[:, None], self.num_ranges, axis=1)
-
-            # 4) Build model input: (seq_len, num_ranges, 2)
-            seq = np.stack([scans, dt_tiled], axis=2)
-
-            # 5) Add batch dim: (1, seq_len, num_ranges, 2)
-            inp = seq[None, ...].astype(np.float32)
+                # Single-channel input — no timestamp encoding
+                inp = scans[None, ..., None].astype(np.float32)
             
             # Debug logging
             self.get_logger().debug(f'Input shape: {inp.shape}, dtype: {inp.dtype}')
@@ -227,10 +200,7 @@ class AutonomousNode(Node):
 
     @staticmethod
     def linear_map(x, x_min, x_max, y_min, y_max):
-        # Prevent division by zero
-        if x_max == x_min:
-            return (y_max + y_min) / 2  # Return middle of output range
-        return (x - x_min)/(x_max - x_min)*(y_max - y_min) + y_min
+        return _linear_map(x, x_min, x_max, y_min, y_max)
 
     def control_loop(self):
         try:
@@ -265,8 +235,7 @@ class AutonomousNode(Node):
                     f'Deadline miss: {dur*1000:.1f} ms'
                 )
             self.start_ts = time.time()
-            self.init_ts = time.time()
-            
+
         except Exception as e:
             self.get_logger().error(f'Error in control_loop: {e}')
 
@@ -297,7 +266,7 @@ def main(args=None):
     rclpy.init(args=args)
     
     try:
-        node = AutonomousNode()
+        node = RLNNode()
         rclpy.spin(node)
     except Exception as e:
         print(f"Fatal error: {e}")

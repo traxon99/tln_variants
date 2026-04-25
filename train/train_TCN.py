@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# INCOMPLETE — this file is an unfinished architecture sketch.
+# 'import keras-tcn' is invalid Python syntax (hyphen in module name).
+# The read_ros2_bag function also returns a non-standard 6-tuple.
+# Do not attempt to run this file without significant rework.
+
 import os
 import time
 import numpy as np
