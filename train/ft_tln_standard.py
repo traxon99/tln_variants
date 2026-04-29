@@ -84,7 +84,7 @@ def main():
     huber = tf.keras.losses.Huber()
 
     # ---- 2. Load and fine tune ----
-    model = keras.models.load_model("/home/jackson/sim_ws/src/tln_variants/train/Models/test_preft.keras")
+    model = keras.models.load_model("/home/jackson/sim_ws/src/tln_variants/train/Models/Keras/test_preft.keras")
 
 
     # Freeze only the first conv layer(s), let later ones adapt
@@ -105,7 +105,7 @@ def main():
     model.fit(lidar_train, train_data, epochs=10, validation_split=0.2)
 
     # ---- 3. Save fine-tuned model ----
-    model.save("finetuned.keras")
+    model.save("./Models/Keras/finetuned.keras")
     
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     tflite_model = converter.convert()
