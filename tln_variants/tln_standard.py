@@ -12,8 +12,6 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from sensor_msgs.msg import Joy
 
-TLN_M = False
-
 class TLNStandard(Node):
     def __init__(self):
         super().__init__('tln_standard')
@@ -25,7 +23,7 @@ class TLNStandard(Node):
         self.declare_parameter('min_speed', 1.0)
         self.declare_parameter('max_speed', 8.0)
         self.declare_parameter('downscale_factor', 2)
-        self.declare_parameter('model_path', '/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite')
+        self.declare_parameter('model_path', None)
 
         # Load parameters
         self.sim = self.get_parameter('sim').value
@@ -33,6 +31,7 @@ class TLNStandard(Node):
         self.init_max_speed = self.get_parameter('max_speed').value
         self.downscale_factor = self.get_parameter('downscale_factor').value
         self.model_path = self.get_parameter('model_path').value
+        self.TLN_M = self.declare_parameter('TLN_M').value
 
         #global boolean for Autonomous control
         self.go = False
@@ -171,7 +170,7 @@ class TLNStandard(Node):
             scans = np.array(msg.ranges)
             
             # Account for weird size issue with TLN M
-            if TLN_M:
+            if self.TLN_M:
                 scans = np.append(scans, [20]) #Only for Original TLN (541 scans)
             
                         

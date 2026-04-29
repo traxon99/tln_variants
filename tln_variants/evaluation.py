@@ -6,6 +6,7 @@ import yaml
 #for graphing
 import numpy as np
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.axes as ax
 from matplotlib.collections import LineCollection
@@ -13,38 +14,42 @@ from matplotlib.collections import LineCollection
 import csv
 import os
 import sys
+from datetime import datetime
 
 class Evaluation(Node):
-    def __init__(self, name = "Planner", map=None, max_laps=3, eval_lap=1):
-        super().__init__('evaluation_node')
+    def __init__(self):
+        super().__init__('evaluation')
 
         # Declare parameters
-        self.declare_parameter("ego_scan_topic")
-        self.declare_parameter("ego_odom_topic")
+        self.declare_parameter("ego_scan_topic", "/scan")
+        self.declare_parameter("ego_odom_topic", "/odom")
 
         # Evaluation parameters
-        self.declare_parameter("model_name")
-        self.declare_parameter("max_laps")
-        self.declare_parameter("evaluation_lap")
-        self.declare_parameter("centerline_path")
-        self.declare_parameter("map_path")
-        self.declare_parameter("map_img_ext")
+        self.declare_parameter("model_name", "TLN")
+        self.declare_parameter("max_laps", 1)
+        self.declare_parameter("evaluation_lap", 0)
+        self.declare_parameter("centerline_path", "")
+        self.declare_parameter("map_path", "")
+        self.declare_parameter("map_img_ext", ".png")
 
-        # Example: how to read them back
         scan_topic = self.get_parameter("ego_scan_topic").get_parameter_value().string_value
-        self.get_logger().info(f"Using scan topic: {scan_topic}")
+        odom_topic = self.get_parameter("ego_odom_topic").get_parameter_value().string_value
+        
+        self.name = self.get_parameter("model_name").value
+        self.max_laps = self.get_parameter("max_laps").value
+        self.eval_lap = self.get_parameter("evaluation_lap").value
+        self.centerline_path = self.get_parameter("centerline_path").value
+        self.map_name = self.get_parameter("map_path").value
+        self.map_img_ext = self.get_parameter("map_img_ext").value
+
+        
         
         self.output_dir = 'temp/'
-        
-        #extract evaluation parameters from Node
-        self.name = name
-        self.map_name = map
-        self.max_laps = max_laps
-        self.eval_lap = eval_lap
 
-        #load path data from centerline csv file
-        # self.path_data = np.loadtxt(f'{os.getcwd()}{map_name}_centerline.csv', delimiter=',', usecols=(0, 1))
-        self.path_data = np.loadtxt('/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/Austin_centerline.csv', delimiter=',', usecols=(0, 1))
+        if not self.centerline_path:
+            self.get_logger().fatal("centerline_path parameter is required. Run with a config file.")
+            raise ValueError("centerline_path not set")
+        self.path_data = np.loadtxt(self.centerline_path, delimiter=',', usecols=(0, 1))
         
         #starting point parameters
         self.starting_x = 0     # GYM -52
@@ -65,6 +70,7 @@ class Evaluation(Node):
         self.absolute_progress = 0.0
 
         self.crash = False
+        self.done = False
 
         self.speeds = []
         self.progresses = []
@@ -72,17 +78,16 @@ class Evaluation(Node):
         self.ys = []
 
 
-        # Pass the callback group when creating the subscription
         self.odom_subscription = self.create_subscription(
-            Odometry, 
-            '/ego_racecar/odom', 
-            self.odom_callback, 
+            Odometry,
+            odom_topic,
+            self.odom_callback,
             10
         )
         self.scan_subscription = self.create_subscription(
             LaserScan,
-            '/scan',
-             self.scan_callback,
+            scan_topic,
+            self.scan_callback,
             10)
 
         
@@ -158,9 +163,33 @@ class Evaluation(Node):
     
     
     def wrap_up(self):
+        if self.done:
+            return
+        self.done = True
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(self.output_dir, f"{self.name}_{timestamp}")
+        os.makedirs(run_dir, exist_ok=True)
+
+        avg_speed = float(np.mean(self.speeds)) if self.speeds else 0.0
+        avg_time = float(np.mean(self.lap_times)) if self.lap_times else 0.0
+
         print(f"Lap times:\t{self.lap_times}\n"
-            f"Average time:\t{np.mean(self.lap_times)}\n"
-            f"Average speed:\t{np.mean(self.speeds)}")
+              f"Average time:\t{avg_time}\n"
+              f"Average speed:\t{avg_speed}")
+
+        metrics_path = os.path.join(run_dir, "metrics.txt")
+        with open(metrics_path, 'w') as f:
+            f.write(f"Model:         {self.name}\n")
+            f.write(f"Map:           {self.map_name}\n")
+            f.write(f"Timestamp:     {timestamp}\n")
+            f.write(f"Crashed:       {self.crash}\n")
+            f.write(f"Laps:          {self.lap_count}\n")
+            f.write(f"Lap times:     {self.lap_times}\n")
+            f.write(f"Average time:  {avg_time:.4f} s\n")
+            f.write(f"Average speed: {avg_speed:.4f} m/s\n")
+            f.write(f"Max speed:     {float(np.max(self.speeds)) if self.speeds else 0.0:.4f} m/s\n")
+            f.write(f"Min speed:     {float(np.min(self.speeds)) if self.speeds else 0.0:.4f} m/s\n")
+        self.get_logger().info(f"Metrics saved to {metrics_path}")
 
         # Plot 1: speed vs. track progress
         fig1, ax1 = plt.subplots()
@@ -171,17 +200,21 @@ class Evaluation(Node):
         ax1.set_ylabel("Speed")
         ax1.set_title(f"{self.name}: Speed vs. Track Progress on {self.map_name}")
         ax1.grid(True)
+        plot1_path = os.path.join(run_dir, "speed_vs_progress.png")
+        fig1.savefig(plot1_path, dpi=200, bbox_inches='tight')
+        plt.close(fig1)
+        self.get_logger().info(f"Plot saved to {plot1_path}")
 
         # --- Load map yaml ---
-        yaml_path = f"/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/{self.map_name}.yaml"
+        yaml_path = f"{self.map_name}.yaml"
         with open(yaml_path, 'r') as f:
             map_info = yaml.safe_load(f)
 
-        resolution = map_info['resolution']                # 0.08089
-        origin = map_info['origin']                       # [-21.25, -70.80, 0.0]
+        resolution = map_info['resolution']
+        origin = map_info['origin']
 
         # --- Load image ---
-        img_path = f"/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/{map_info['image']}"
+        img_path = os.path.join(os.path.dirname(self.map_name), map_info['image'])
         img = plt.imread(img_path)
 
         # Compute image extents in world coordinates
@@ -192,19 +225,15 @@ class Evaluation(Node):
         y_max = origin[1] + height * resolution
 
         fig2, ax2 = plt.subplots()
-        # swapped x_min/x_max to mirror horizontally
-        norm = plt.Normalize(1,8)
-        colors = ['blue', 'white', 'red']
-        cmap = matplotlib.colors.LinearSegmentedColormap.from_list("",colors)
         ax2.imshow(img,
-                cmap='gray',                # force grayscale display
+                cmap='gray',
                 origin='lower',
                 extent=[x_min, x_max, y_max, y_min])
         points = np.array([self.xs, self.ys]).T.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
         norm = plt.Normalize(vmin=1, vmax=8)
-        cmap = plt.get_cmap("viridis")  # or blue-white-red
+        cmap = plt.get_cmap("viridis")
 
         lc = LineCollection(segments, cmap=cmap, norm=norm)
         lc.set_array(self.speeds)
@@ -212,7 +241,11 @@ class Evaluation(Node):
 
         ax2.add_collection(lc)
         plt.colorbar(lc, ax=ax2, label="Speed [m/s]")
-        plt.show()
+        plot2_path = os.path.join(run_dir, "trajectory_map.png")
+        fig2.savefig(plot2_path, dpi=200, bbox_inches='tight')
+        plt.close(fig2)
+        self.get_logger().info(f"Plot saved to {plot2_path}")
+        raise SystemExit(0)
 
 
     def update_progress(self, x, y):
@@ -229,32 +262,17 @@ class Evaluation(Node):
 
         if self.start == True:
             self.starting_progress = self.absolute_progress
-            print(f"Starting progrss: {self.starting_progress:.0%}")
 
         self.relative_progress = (1 - self.starting_progress) + self.absolute_progress
         if self.relative_progress >= 1:
             self.relative_progress -= 1
-        print(f"Lap: {self.lap_count}\tProgress: {self.relative_progress:.0%}")
-        # if round(self.relative_progress, 3) % 0.25 == 0:
-            # print(round(self.relative_progress, 2))
+        print(f"\rLap: {self.lap_count}  Progress: {self.relative_progress:.0%}   ", end='', flush=True)
 
 
 
 def main(args=None):
-    map = None
-    max_laps = None
-    eval_lap = None
-    try:
-        name = str(sys.argv[1])
-        map = str(sys.argv[2])
-        max_laps = int(sys.argv[3])
-        eval_lap = int(sys.argv[4])
-        assert eval_lap <= max_laps
-    except:
-        raise ValueError()
-
     rclpy.init(args=args)
-    node = Evaluation(name=name, map=map, max_laps=max_laps, eval_lap=eval_lap)
+    node = Evaluation()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -263,9 +281,5 @@ def main(args=None):
         node.destroy_node()
         rclpy.shutdown()
         
-
-# def analyze(avg_speeds, lap_times):
-#     return fastest_time, slowest_time, avg_lap_time
-
 if __name__ == '__main__':
     main()

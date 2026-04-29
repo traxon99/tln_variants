@@ -10,7 +10,12 @@ from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from typing import List, Tuple
 
-from tln_variants.utils import find_db3_files, read_ros2_bag, linear_map
+# from tln_variants.utils import find_db3_files, read_ros2_bag, linear_map
+import numpy as np
+from ackermann_msgs.msg import AckermannDriveStamped
+from rclpy.serialization import deserialize_message
+from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
+from sensor_msgs.msg import LaserScan
 
 DOWNSCALE_FACTOR = 2
 
@@ -104,6 +109,41 @@ def linear_map(
     return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
 
 
+def balance_steering(
+    lidar: np.ndarray,
+    servo: np.ndarray,
+    speed: np.ndarray,
+    straight_threshold: float = 0.01,
+    seed: int = 42,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Balance left/right steering samples by downsampling the majority side.
+
+    Samples whose |steering| <= straight_threshold are considered straight and
+    kept in full. Left and right samples are each capped at min(n_left, n_right).
+    """
+    left_idx     = np.where(servo < -straight_threshold)[0]
+    right_idx    = np.where(servo >  straight_threshold)[0]
+    straight_idx = np.where(np.abs(servo) <= straight_threshold)[0]
+
+    n_left   = len(left_idx)
+    n_right  = len(right_idx)
+    n_target = min(n_left, n_right)
+
+    print(f'Steering balance — before: left={n_left}, right={n_right}, '
+          f'straight={len(straight_idx)}, total={len(servo)}')
+
+    rng = np.random.default_rng(seed)
+    left_keep  = rng.choice(left_idx,  n_target, replace=False)
+    right_keep = rng.choice(right_idx, n_target, replace=False)
+
+    keep_idx = np.sort(np.concatenate([left_keep, right_keep, straight_idx]))
+
+    print(f'Steering balance — after:  left={n_target}, right={n_target}, '
+          f'straight={len(straight_idx)}, total={len(keep_idx)}')
+
+    return lidar[keep_idx], servo[keep_idx], speed[keep_idx]
+
+
 #========================================================
 # Main
 #========================================================
@@ -112,7 +152,7 @@ if __name__ == '__main__':
     #"Good" model
 
     # TLN Standard
-    bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/ForzaNewDataset/raceline')
+    bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/ForzaNewDataset/raceline') 
 
 
     # Bag path for decent model TLN_Forza WITH CUSTOM LOSS - Current prelim results
@@ -285,6 +325,10 @@ if __name__ == '__main__':
     
     servo = np.array(all_servo)
     speed = np.array(all_speed)
+
+    # Balance left/right steering
+    lidar, servo, speed = balance_steering(lidar, servo, speed)
+
     print(speed.max())
     speed = linear_map(speed, speed.min(), speed.max(), 0, 1)
 
