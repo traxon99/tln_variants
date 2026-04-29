@@ -1,3 +1,6 @@
+#ignore pyc build files
+tln_variants/__pycache__/**
+
 
 train/Dataset/**
 train/Models/**
@@ -6,5 +9,5 @@ train/Figures/loss_curve.png
 train/Models/lidar_imitation_model_loss.png
 
 #ignore all plots and metrics.txt in data_eval
-data_eval/plots/**
-data_eval/metrics.txt
+data_eval/output/**
+tln_variants.egg-info/**

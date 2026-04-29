@@ -9,6 +9,7 @@ tln_standard:
 
     # Use every Nth LiDAR beam (2 = half resolution)
     downscale_factor: 2
+    TLN_M: false
 
     # Path to the TFLite model
-    model_path: '/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_Forza.tflite'
+    model_path: '/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_M_noquantized.tflite'

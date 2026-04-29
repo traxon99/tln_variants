@@ -30,7 +30,8 @@ from ackermann_msgs.msg import AckermannDriveStamped
 #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/lab_oval_12_4_25/lab_oval_12_4_25.db3',
 #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/2_27_hard_forza/2_27_hard_forza.db3',
 # ]
-    
+
+# from tln_variants.utils import find_db3_files
 def find_db3_files(directory):
     db3_files = []
     for root, dirs, files in os.walk(directory):
@@ -40,11 +41,11 @@ def find_db3_files(directory):
     return db3_files
 
 # TLN Standard
-bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/TLN_Original_Dataset')
+bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/ForzaNewDataset') + ['/home/jackson/sim_ws/src/tln_variants/train/Dataset/old/3_26/3_26_ccw_forza/3_26_ccw_forza.db3']
 
 
-PLOTS_DIR = os.path.join(os.path.dirname(__file__), 'plots')
-METRICS_FILE = os.path.join(os.path.dirname(__file__), 'metrics.txt')
+PLOTS_DIR = os.path.join(os.path.dirname(__file__), 'output/plots')
+METRICS_FILE = os.path.join(os.path.dirname(__file__), 'output/metrics.txt')
 
 SPEED_Y_MIN = 0.0
 SPEED_Y_MAX = 10.0

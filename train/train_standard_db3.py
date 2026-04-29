@@ -9,58 +9,9 @@ import matplotlib.pyplot as plt
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 
-# ROS 2 bag imports
-from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
-from rclpy.serialization import deserialize_message
-from sensor_msgs.msg import LaserScan
-from ackermann_msgs.msg import AckermannDriveStamped
-from nav_msgs.msg import Odometry
+from tln_variants.utils import find_db3_files, read_ros2_bag, linear_map
 
 DOWNSCALE_FACTOR = 2
-max_spd = 0
-
-#========================================================
-# Utility functions
-#========================================================
-def linear_map(x, x_min, x_max, y_min, y_max):
-    return (x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min
-
-def read_ros2_bag(bag_path):
-    storage_opts = StorageOptions(uri=bag_path, storage_id='sqlite3')
-    conv_opts = ConverterOptions(input_serialization_format='', output_serialization_format='')
-    reader = SequentialReader()
-    reader.open(storage_opts, conv_opts)
-
-    lidar_data, servo_data, speed_data, timestamps = [], [], [], []
-    
-    max_spd = 0
-
-    while reader.has_next():
-        topic, serialized_msg, t_ns = reader.read_next()
-        t = t_ns * 1e-9
-
-        if topic == 'scan' or topic == 'Lidar':
-            msg = deserialize_message(serialized_msg, LaserScan)
-            cleaned = np.nan_to_num(msg.ranges, posinf=0.0, neginf=0.0)
-            lidar_data.append(cleaned[::DOWNSCALE_FACTOR])
-            timestamps.append(t)
-        elif topic == 'drive' or topic == 'Ackermann':
-            msg = deserialize_message(serialized_msg, AckermannDriveStamped)
-            servo_data.append(msg.drive.steering_angle)
-            if msg.drive.speed > max_spd:
-                max_spd = msg.drive.speed
-            speed_data.append(msg.drive.speed)
-        # elif topic == 'odom':
-        #     msg = deserialize_message(serialized_msg, Odometry)
-        #     servo_data.append(msg.twist.twist.angular.z)
-        #     speed_data.append(msg.twist.twist.linear.x)
-
-    return (
-        np.array(lidar_data),
-        np.array(servo_data),
-        np.array(speed_data),
-        np.array(timestamps),
-    )
 
 
 
@@ -70,6 +21,10 @@ def read_ros2_bag(bag_path):
 if __name__ == '__main__':
     print('GPU AVAILABLE:', bool(tf.config.list_physical_devices('GPU')))
     #"Good" model
+
+    # TLN Standard
+    bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/TLN_Original_Dataset')
+
 
     # Bag path for decent model TLN_Forza WITH CUSTOM LOSS - Current prelim results
     # bag_paths = [
@@ -116,11 +71,11 @@ if __name__ == '__main__':
 
     # ]
     
-    bag_paths = [
-        'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
-        'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
-        'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
-    ]
+    # bag_paths = [
+    #     'Dataset/5_min_austin_sim/5_min_austin_sim_0.db3',
+    #     'Dataset/5_min_moscow_sim/5_min_moscow_sim_0.db3',
+    #     'Dataset/5_min_Spiel_sim/5_min_Spiel_sim_0.db3'
+    # ]
     #TLN Standard
     # bag_paths = [
     #     '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
@@ -222,7 +177,7 @@ if __name__ == '__main__':
 
     all_lidar, all_servo, all_speed, all_ts = [], [], [], []
     for pth in bag_paths:
-        l, s, sp, ts = read_ros2_bag(pth)
+        l, s, sp, ts = read_ros2_bag(pth, downsample=DOWNSCALE_FACTOR)
         print(f'Loaded {len(l)} scans from {pth}')
         all_lidar.extend(l)
         all_servo.extend(s)
@@ -319,6 +274,9 @@ if __name__ == '__main__':
     print(f"Speed Test Huber Loss: {huber(test_data[:, 1], predictions[:, 1]).numpy():.4f}")
 
     # Save Model
+    
+    model.save(f"./Models/{model_name}_preft.keras")
+    
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     tflite_model = converter.convert()
     os.makedirs('./Models', exist_ok=True)
