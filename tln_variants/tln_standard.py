@@ -9,7 +9,7 @@ import tensorflow as tf
 from rclpy.node import Node
 from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Float32
 from sensor_msgs.msg import Joy
 
 class TLNStandard(Node):
@@ -45,9 +45,10 @@ class TLNStandard(Node):
         self.speed_map = self.speed_mappings[0]
 
 
-        self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
+        self.steer_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/steering_command', 10)
+        self.throttle_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/throttle_command', 10)
         # self.stats_publisher = self.create_publisher('/stats', 10)
-        self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.scan_subscription = self.create_subscription(LaserScan, '/autodrive/roboracer_1/lidar', self.scan_callback, 10)
         # self.joy_subscription = self.create_subscription(Joy,'joy',self.joy_callback, 10)
 
         # 0.2       5hz
@@ -162,7 +163,7 @@ class TLNStandard(Node):
 
     def scan_callback(self, msg):
         # Scan callback from /scan topic. Called every time /scan receives a message
-        
+        self.get_logger().warn(f"Scan received")
         # Only process scans when going
         if self.go or self.sim:  
             
@@ -191,7 +192,7 @@ class TLNStandard(Node):
             # Store scan in self.scan 
             self.scan = scans
         else:
-            self.publish_ackermann_drive(0, 0)
+            self.publish_drive(0, 0)
             
             
     def inference_dnn(self):
@@ -214,24 +215,20 @@ class TLNStandard(Node):
             steer = output[0, 0]
             speed = output[0, 1]
 
-            speed = self.speed_map(speed, 0, 1, self.min_speed, self.max_speed)
+            # speed = self.speed_map(speed, 0, 1, self.min_speed, self.max_speed)
             self.get_logger().info(f"speed: {speed},steer: {steer}")
-            self.publish_ackermann_drive(speed, steer)
+            self.publish_drive(speed, steer)
         
     
-    def publish_ackermann_drive(self, speed, steering_angle):
+    def publish_drive(self, speed, steering_angle):
         # Pretty much a boilerplate publishing function
+        self.steer_publisher.publish(float(steering_angle))
+        self.throttle_publisher.publish(float(speed))
         
-        ackermann_msg = AckermannDriveStamped()
-        ackermann_msg.header = Header()
-        ackermann_msg.header.stamp = self.get_clock().now().to_msg()
-        ackermann_msg.drive.speed = float(speed)
-        ackermann_msg.drive.steering_angle = float(steering_angle)
-
-        self.ackermann_publisher.publish(ackermann_msg)
+        
         
         # Debug, if there was a debug mode lmao
-        # self.get_logger().info(f'Published AckermannDriveStamped message: speed={speed}, steering_angle={steering_angle}')
+        self.get_logger().info(f'Published command: speed={speed}, steering_angle={steering_angle}')
 
 def main(args=None):
     # Init ROS2
@@ -246,7 +243,7 @@ def main(args=None):
         node.get_logger().info('Keyboard Interrupt (SIGINT)')
     finally:
         # Send one last stop command
-        node.publish_ackermann_drive(0,0)
+        node.publish_drive(0,0)
         node.destroy_node()
         rclpy.shutdown()
 
