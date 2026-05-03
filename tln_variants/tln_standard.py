@@ -7,7 +7,6 @@ import numpy as np
 import time
 import tensorflow as tf
 from rclpy.node import Node
-from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header, Float32
 from sensor_msgs.msg import Joy
@@ -45,7 +44,7 @@ class TLNStandard(Node):
         self.speed_map = self.speed_mappings[0]
 
 
-        self.steer_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/steering_command', 10)
+        self.steering_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/steering_command', 10)
         self.throttle_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/throttle_command', 10)
         # self.stats_publisher = self.create_publisher('/stats', 10)
         self.scan_subscription = self.create_subscription(LaserScan, '/autodrive/roboracer_1/lidar', self.scan_callback, 10)
@@ -58,7 +57,7 @@ class TLNStandard(Node):
 
 
         #timer to control dnn inference rate, rather than being limited by scan callback.
-        self.timer = self.create_timer(0.0001, self.inference_dnn)
+        self.timer = self.create_timer(0.01, self.inference_dnn)
 
         #used to store intermediate scan
         self.scan = None
@@ -163,7 +162,7 @@ class TLNStandard(Node):
 
     def scan_callback(self, msg):
         # Scan callback from /scan topic. Called every time /scan receives a message
-        self.get_logger().warn(f"Scan received")
+        self.get_logger().info(f"Scan received")
         # Only process scans when going
         if self.go or self.sim:  
             
@@ -184,7 +183,7 @@ class TLNStandard(Node):
             scans[scans > 10] = 10
             
             # Use every other value
-            scans = scans[::self.downscale_factor]
+            scans = scans[::self.downscale_factor][:-1]
             
             scans = np.expand_dims(scans, axis=-1).astype(np.float32)
             scans = np.expand_dims(scans, axis=0)
@@ -215,20 +214,27 @@ class TLNStandard(Node):
             steer = output[0, 0]
             speed = output[0, 1]
 
-            # speed = self.speed_map(speed, 0, 1, self.min_speed, self.max_speed)
+            speed = 0.05
+            # speed = self.speed_map(speed, 0, 1, 0, 1)
             self.get_logger().info(f"speed: {speed},steer: {steer}")
             self.publish_drive(speed, steer)
         
     
     def publish_drive(self, speed, steering_angle):
+        
+        speed_msg = Float32()
+        steering_msg = Float32()
+        
+        speed_msg.data = float(speed)
+        steering_msg.data = float(steering_angle)
         # Pretty much a boilerplate publishing function
-        self.steer_publisher.publish(float(steering_angle))
-        self.throttle_publisher.publish(float(speed))
+        self.steering_publisher.publish(steering_msg)
+        self.throttle_publisher.publish(speed_msg)
         
         
         
         # Debug, if there was a debug mode lmao
-        self.get_logger().info(f'Published command: speed={speed}, steering_angle={steering_angle}')
+        self.get_logger().info(f'Published command: speed={speed_msg.data}, steering_angle={steering_msg.data}')
 
 def main(args=None):
     # Init ROS2
