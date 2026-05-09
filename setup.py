@@ -23,23 +23,6 @@ setup(
     entry_points={
         'console_scripts': [
             'tln_standard = tln_variants.tln_standard:main',
-            'tln_temporal = tln_variants.tln_temporal:main',
-            'ftg = tln_variants.ftg:main',
-            'evaluation = tln_variants.evaluation:main',
-            'data_collection = tln_variants.data_collection:main',
-            'ftg_opp = tln_variants.ftg_opp:main',
-            'joy_node_drive = tln_variants.joy:main',
-            'joy_test = tln_variants.joy_test:main',
-            'tln_override = tln_variants.tln_standard_override:main',
-            'tln_vel = tln_variants.tln_standard_vel:main',
-            'rln = tln_variants.rln:main',
-            'rln_collect = tln_variants.rnn_data_collection:main',
-            'rln_no_ts = tln_variants.rln_no_ts:main',
-            'rln_sim = tln_variants.rln_sim:main',
-            'centerline_logger = tln_variants.centerline_logger:main',
-            'centerline_processor = tln_variants.centerline_processor:main',
-            'raceline_optimizer = tln_variants.raceline_optimizer:main',
-            'pure_pursuit = tln_variants.pure_pursuit:main',
         ],
     },
 )
