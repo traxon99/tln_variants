@@ -1,0 +1,32 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  duration:
+    nanoseconds: 124974383019
+  starting_time:
+    nanoseconds_since_epoch: 1778051719990545490
+  message_count: 10000
+  topics_with_message_count:
+    - topic_metadata:
+        name: drive
+        type: ackermann_msgs/msg/AckermannDriveStamped
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 5000
+    - topic_metadata:
+        name: scan
+        type: sensor_msgs/msg/LaserScan
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 5000
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - porto_expert_v1_ccw_0.db3
+  files:
+    - path: porto_expert_v1_ccw_0.db3
+      starting_time:
+        nanoseconds_since_epoch: 1778051719990545490
+      duration:
+        nanoseconds: 124974383019
+      message_count: 10000
