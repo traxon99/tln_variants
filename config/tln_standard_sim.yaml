@@ -4,12 +4,17 @@ tln_standard:
     sim: true
 
     # Speed limits (m/s)
-    min_speed: 1.0
-    max_speed: 8.0
-
+    # min_speed: 0.0981  #1m/s 12
+    # max_speed: 0.26 # 22
+    min_speed: 0.04 #1m/s 12
+    max_speed: 0.26 # 22
     # Use every Nth LiDAR beam (2 = half resolution)
     downscale_factor: 2
     TLN_M: false
+    print_debug: false
+    autodrive_model: true
 
     # Path to the TFLite model
-    model_path: '/home/jackson/sim_ws/src/tln_variants/train/Models/TLN_M_noquantized.tflite'
+    # model_path: '/home/autodrive_devkit/src/tln_variants/train/Models/PP_model_balanced_noquantized.tflite'
+    # model_path: '/home/autodrive_devkit/src/tln_variants/train/Models/TLN_M_noquantized.tflite'
+    model_path: '/home/autodrive_devkit/src/tln_variants/train/Models/Mixed_TLN_050926_noquantized.tflite'

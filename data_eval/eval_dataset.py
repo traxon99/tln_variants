@@ -41,14 +41,14 @@ def find_db3_files(directory):
     return db3_files
 
 # TLN Standard
-bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/ForzaNewDataset') + ['/home/jackson/sim_ws/src/tln_variants/train/Dataset/old/3_26/3_26_ccw_forza/3_26_ccw_forza.db3']
+bag_paths = find_db3_files('/home/autodrive_devkit/src/tln_variants/train/dataset')
 
 
 PLOTS_DIR = os.path.join(os.path.dirname(__file__), 'output/plots')
 METRICS_FILE = os.path.join(os.path.dirname(__file__), 'output/metrics.txt')
 
 SPEED_Y_MIN = 0.0
-SPEED_Y_MAX = 10.0
+SPEED_Y_MAX = 1
 
 # F1TENTH max steering angle (radians)
 STEER_Y_MIN = -0.4189
@@ -90,8 +90,8 @@ def plot_speed_vs_time(speeds, timestamps, bag_name, out_path):
     ax.plot(t_rel, speeds, linewidth=0.8, color='steelblue')
     ax.set_ylim(SPEED_Y_MIN, SPEED_Y_MAX)
     ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Speed (m/s)')
-    ax.set_title(f'Speed vs Time — {bag_name}')
+    ax.set_ylabel('Throttle (%)')
+    ax.set_title(f'Throttle vs Time — {bag_name}')
     ax.grid(True, alpha=0.4)
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)

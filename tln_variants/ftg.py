@@ -2,27 +2,27 @@ import rclpy
 from math import pi
 from rclpy.node import Node
 from statistics import mean
-from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Float32
 import numpy as np
 
 class FtgNode(Node):
     def __init__(self):
         super().__init__('ftg_node')
-        self.ackermann_publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
-        self.scan_subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.steering_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/steering_command', 10)
+        self.throttle_publisher = self.create_publisher(Float32, '/autodrive/roboracer_1/throttle_command', 10)
+        self.scan_subscription = self.create_subscription(LaserScan, '/autodrive/roboracer_1/lidar', self.scan_callback, 10)
         self.get_logger().info('Jackson FTGNode has been started.')
 
         #adapted parameters from BDEvan5 f1tenth benchmarks FTG implementation
-        self.bubble_radius = 330
+        self.bubble_radius = 270
         self.preprocess_conv_size = 3
         self.best_point_conv_size = 80
         self.max_lidar_dist = 10.0
-        self.fast_speed = 7.0
-        self.straights_speed = 4.5
-        self.corners_speed = 1.5
+        self.fast_speed = 0.17
+        self.straights_speed = 0.09
+        self.corners_speed = 0.09
         self.straights_steering_angle = 0.174 
         self.fast_steering_angle = 0.0785 #0.0785
         self.safe_threshold = 6
@@ -59,7 +59,7 @@ class FtgNode(Node):
             speed = self.fast_speed
 
 
-        self.publish_ackermann_drive(speed, steering_angle)
+        self.publish_drive(speed, steering_angle)
 
     def preprocess_lidar(self, ranges):
             """ Preprocess the LiDAR scan array. Expert implementation includes:
@@ -68,7 +68,7 @@ class FtgNode(Node):
             """
             self.radians_per_elem = (2 * np.pi) / len(ranges)
             # we won't use the LiDAR data from directly behind us
-            proc_ranges = np.array(ranges[135:-135])
+            proc_ranges = np.array(ranges[180:-180])
             # sets each value to the mean over a given window
             proc_ranges = np.convolve(proc_ranges, np.ones(self.preprocess_conv_size), 'same') / self.preprocess_conv_size
             proc_ranges = np.clip(proc_ranges, 0, self.max_lidar_dist)
@@ -113,16 +113,21 @@ class FtgNode(Node):
         steering_angle = np.clip(steering_angle, -self.max_steer, self.max_steer)
         return steering_angle
     
+    def publish_drive(self, speed, steering_angle):
         
-    def publish_ackermann_drive(self, speed, steering_angle):
-        ackermann_msg = AckermannDriveStamped()
-        ackermann_msg.header = Header()
-        ackermann_msg.header.stamp = self.get_clock().now().to_msg()
-        ackermann_msg.drive.speed = float(speed)
-        ackermann_msg.drive.steering_angle = float(steering_angle)
-
-        self.ackermann_publisher.publish(ackermann_msg)
-        self.get_logger().info(f'Published AckermannDriveStamped message: speed={speed}, steering_angle={steering_angle}')
+        speed_msg = Float32()
+        steering_msg = Float32()
+        
+        speed_msg.data = float(speed)
+        steering_msg.data = float(steering_angle)
+        # Pretty much a boilerplate publishing function
+        self.steering_publisher.publish(steering_msg)
+        self.throttle_publisher.publish(speed_msg)
+        
+        
+        
+        # Debug, if there was a debug mode lmao
+        self.get_logger().info(f'Published command: speed={speed_msg.data}, steering_angle={steering_msg.data}')
 
 def main(args=None):
     rclpy.init(args=args)

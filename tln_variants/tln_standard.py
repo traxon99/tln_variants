@@ -2,6 +2,7 @@
 # Author: Jackson Yanek
 # For University of Kansas CSL
 
+import gc
 import rclpy
 import numpy as np
 import time
@@ -19,19 +20,24 @@ class TLNStandard(Node):
 
         # Declare ROS2 parameters (overridable via config file or command line)
         self.declare_parameter('sim', True)
-        self.declare_parameter('min_speed', 1.0)
-        self.declare_parameter('max_speed', 8.0)
+        self.declare_parameter('min_speed', 0.05)
+        self.declare_parameter('max_speed', 0.5)
         self.declare_parameter('downscale_factor', 2)
         self.declare_parameter('model_path', None)
-
+        self.declare_parameter('TLN_M', False)
+        self.declare_parameter('print_debug', False)
+        self.declare_parameter('autodrive_model', True)
+        
         # Load parameters
         self.sim = self.get_parameter('sim').value
         self.init_min_speed = self.get_parameter('min_speed').value
         self.init_max_speed = self.get_parameter('max_speed').value
         self.downscale_factor = self.get_parameter('downscale_factor').value
         self.model_path = self.get_parameter('model_path').value
-        self.TLN_M = self.declare_parameter('TLN_M').value
-
+        self.TLN_M = self.get_parameter('TLN_M').value
+        self.debug = self.get_parameter('print_debug').value
+        self.autodrive_model = self.get_parameter('autodrive_model').value
+        
         #global boolean for Autonomous control
         self.go = False
         self.min_speed = self.init_min_speed
@@ -56,19 +62,23 @@ class TLNStandard(Node):
         # 0.025     40hz
 
 
-        #timer to control dnn inference rate, rather than being limited by scan callback.
-        self.timer = self.create_timer(0.01, self.inference_dnn)
-
-        #used to store intermediate scan
-        self.scan = None
-
         self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
         self.interpreter.allocate_tensors()
         self.input_index = self.interpreter.get_input_details()[0]["index"]
         self.output_index = self.interpreter.get_output_details()[0]["index"]
 
-        self.get_logger().warn(f'TLN Node Ready. sim={self.sim}, model={self.model_path}')
+        # Pre-allocate scan buffer — avoids per-callback numpy allocation and GC pressure
+        n_rays = self.interpreter.get_input_details()[0]['shape'][1]
+        self._scan_buf = np.zeros((1, n_rays, 1), dtype=np.float32)
 
+        # Disable cyclic GC in the hot path — prevents 20-80ms pauses that drop scan callbacks
+        gc.collect()
+        gc.disable()
+
+        self.get_logger().warn(f'TLN Node Ready. sim={self.sim}, model={self.model_path}')
+        if self.debug:
+            self.get_logger().info(f"TLN_M:\t{self.TLN_M}\nDebug\t{self.debug}")
+            
         if not self.sim:
             self.get_logger().warn('Press right bumper to activate.')
 
@@ -92,134 +102,39 @@ class TLNStandard(Node):
         return vmin + (vmax - vmin) * (np.exp(alpha * z) - 1) / (np.exp(alpha) - 1)
 
 
-    #Callbacks
-    
-    def joy_callback(self, msg):
-        
-        # vars for controller buttons (Playstaion 4 controller)
-        # msg.buttons is the message from the Joy
-        right_shoulder = msg.buttons[10]
-        triangle = msg.buttons[3]
-        square = msg.buttons[2]
-        dpad_up = msg.buttons[11]
-        dpad_down = msg.buttons[12]
-
-        
-        # Deadman
-        if right_shoulder:# and self.sim == False:
-            self.go = True
-        else:
-            self.go = False
-        
-        # Caution mode
-        if triangle == 1:
-            self.min_speed, self.max_speed = 0.0, 4.0
-        
-        # Launch Mode
-        
-        # Launch Mode Activation
-        if (square == True) and (self.go == False):
-            self.get_logger().warn('Launch Mode Activated. Min & Max Speed will be boosted for first second of racing.')
-            self.min_speed, self.max_speed = 15.0, 15.0
-            self.launch = True
-        
-        # Start Launch
-        if self.launch == True and self.go == True:
-            self.get_logger().warn("Launch started")
-            self.launching = True
-            self.launch_time = self.get_clock().now().nanoseconds
-            self.launch = False
-        
-        # While Launching
-        if self.launching:
-            # Update duration
-            launch_dur = self.ns_2_s(self.get_clock().now().nanoseconds - self.launch_time)
-            
-            # check duration
-            if launch_dur >= 1.0:
-                self.launching = False
-                self.get_logger().warn("Launch ended")
-                # reset speed
-                self.min_speed, self.max_speed = self.init_min_speed, self.init_max_speed
-                
-        # Speed adjustment
-        if dpad_up == 1:
-            # Absolute max speed: 20 (m/s) 
-            if self.max_speed < 20.0:
-                self.max_speed += 0.05
-                self.get_logger().warn(f"Max Speed increased: {self.max_speed}")
-            else:
-                self.max_speed = 20.0
-    
-        elif dpad_down == 1:
-            # Lower the max speed
-            if self.max_speed > self.min_speed:
-                self.max_speed -= 0.05
-                self.get_logger().warn(f"Max Speed decreased: {self.max_speed}")
-            else:
-                self.max_speed = self.min_speed
-
-
     def scan_callback(self, msg):
-        # Scan callback from /scan topic. Called every time /scan receives a message
-        self.get_logger().info(f"Scan received")
-        # Only process scans when going
-        if self.go or self.sim:  
-            
-            #convert to np array
-            scans = np.array(msg.ranges)
-            
-            # Account for weird size issue with TLN M
-            if self.TLN_M:
-                scans = np.append(scans, [20]) #Only for Original TLN (541 scans)
-            
-                        
-            # Add noise only in simulation to improve sim-to-real transfer
-            if self.sim:
-                noise = np.random.normal(0, 0.5, scans.shape)
-                scans = scans + noise
-            
-            #Clip values beyond 10m
-            scans[scans > 10] = 10
-            
-            # Use every other value
-            scans = scans[::self.downscale_factor][:-1]
-            
-            scans = np.expand_dims(scans, axis=-1).astype(np.float32)
-            scans = np.expand_dims(scans, axis=0)
-
-            # Store scan in self.scan 
-            self.scan = scans
-        else:
+        if not (self.go or self.sim):
             self.publish_drive(0, 0)
-            
-            
-    def inference_dnn(self):
-        # Inference the DNN. Uses the self.scan as the input.
+            return
 
-        #Only inference when scans are received
-        if self.scan is not None:
-            # Set the tensor to the scan
-            self.interpreter.set_tensor(self.input_index, self.scan)
-            start_time = time.time()
-            self.interpreter.invoke()
-            
-            # For statistics eventually
-            #inf_time = (time.time() - start_time) * 1000  # in milliseconds
 
-            # Get the output from output tensor
-            output = self.interpreter.get_tensor(self.output_index)
-            
-            
-            steer = output[0, 0]
-            speed = output[0, 1]
 
-            speed = 0.05
-            # speed = self.speed_map(speed, 0, 1, 0, 1)
-            self.get_logger().info(f"speed: {speed},steer: {steer}")
-            self.publish_drive(speed, steer)
-        
-    
+        ranges = msg.ranges if not self.TLN_M else list(msg.ranges) + [20.0]
+        raw = np.asarray(ranges, dtype=np.float32)[::self.downscale_factor]
+        np.clip(raw, 0.0, 10.0, out=raw)
+        self._scan_buf[0, :len(raw), 0] = raw
+
+        self.interpreter.set_tensor(self.input_index, self._scan_buf)
+        self.interpreter.invoke()
+        output = self.interpreter.get_tensor(self.output_index)
+
+        steer = output[0, 0]
+        speed = output[0, 1]
+
+
+        if self.debug:
+            self.get_logger().info(f"Before Mapping: speed: {speed},steer: {steer}")
+        speed = self.linear_map(speed, 0, 1, self.min_speed, self.max_speed)
+
+        if self.autodrive_model:
+            steer = float(np.clip(steer, -1.0, 1.0))
+        else:
+            steer = self.linear_map(steer, -0.52, 0.52, -1, 1)
+
+        # if self.debug:
+        #     self.get_logger().info(f"speed: {speed},steer: {steer}")
+        self.publish_drive(speed, steer)
+
     def publish_drive(self, speed, steering_angle):
         
         speed_msg = Float32()
@@ -231,10 +146,6 @@ class TLNStandard(Node):
         self.steering_publisher.publish(steering_msg)
         self.throttle_publisher.publish(speed_msg)
         
-        
-        
-        # Debug, if there was a debug mode lmao
-        self.get_logger().info(f'Published command: speed={speed_msg.data}, steering_angle={steering_msg.data}')
 
 def main(args=None):
     # Init ROS2
@@ -248,9 +159,9 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard Interrupt (SIGINT)')
     finally:
-        # Send one last stop command
-        node.publish_drive(0,0)
+        node.publish_drive(0, 0)
         node.destroy_node()
+        gc.enable()
         rclpy.shutdown()
 
 if __name__ == '__main__':
