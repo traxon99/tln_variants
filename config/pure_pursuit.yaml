@@ -1,0 +1,21 @@
+pure_pursuit:
+  ros__parameters:
+    # Full path to porto_raceline.csv produced by raceline_optimizer.
+    # Must be set before launch.
+    raceline_path: '/home/autodrive_devkit/src/tln_variants/tln_variants/pure_pursuit/porto/porto_raceline.csv'
+
+    # Lookahead distance = base + gain * current_speed  (metres)
+    lookahead_base: 0.5
+    lookahead_gain: 0.25
+
+    # Vehicle geometry
+    wheelbase: 0.33      # m  (rear axle → front axle)
+    max_steer: 1.0       # normalized steering ceiling [0, 1]
+
+    # Safety limits
+    v_max:     1.0       # throttle ceiling [0, 1]
+    v_min:     0.01       # throttle floor   [0, 1]
+
+    # Global speed scale — ramp up as the line looks clean
+    # effective max throttle = speed_scale × v_max
+    speed_scale: 0.25

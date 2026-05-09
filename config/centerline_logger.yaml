@@ -1,0 +1,7 @@
+centerline_logger:
+  ros__parameters:
+    # Where to write the raw CSV.  Change to your preferred path.
+    save_path: '/home/autodrive_devkit/src/tln_variants/tln_variants/pure_pursuit/porto/raw/porto_centerline_raw.csv'
+
+    # Samples per second to log (40 Hz incoming, 5 Hz stored)
+    log_rate_hz: 5.0
