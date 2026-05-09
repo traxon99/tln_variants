@@ -18,6 +18,8 @@ from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
 from sensor_msgs.msg import LaserScan
 
 DOWNSCALE_FACTOR = 2
+MODEL_NAME = "Mixed_TLN_050926"
+
 
 def find_db3_files(directory):
     db3_files = []
@@ -152,7 +154,7 @@ if __name__ == '__main__':
     #"Good" model
 
     # TLN Standard
-    bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/ForzaNewDataset/raceline') 
+    bag_paths = find_db3_files('/home/autodrive_devkit/src/tln_variants/train/dataset') 
 
 
     # Bag path for decent model TLN_Forza WITH CUSTOM LOSS - Current prelim results
@@ -300,8 +302,8 @@ if __name__ == '__main__':
 
     batch_size = 64
     lr = 5e-5
-    num_epochs = 15# 20 #10
-    model_name = 'test'
+    num_epochs = 10# 20 #10
+    model_name = MODEL_NAME#'PP_model_balanced'
     loss_figure_path = f'./Models/{model_name}_loss.png'
 
     all_lidar, all_servo, all_speed, all_ts = [], [], [], []

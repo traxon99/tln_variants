@@ -51,16 +51,13 @@ speed = []
 test_lidar = []
 test_servo = []
 test_speed = []
-model_name = 'TLN'
+model_name = 'PurePursuit_CW'
 model_files = [
     './Models/'+model_name+'_noquantized.tflite',
     './Models/'+model_name+'_int8.tflite'
 ]
 dataset_path = [
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/out/out.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f2/f2.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/f4/f4.db3',
-        '/home/jackson/sim_ws/src/tln_variants/train/Dataset/qualifier_out/qualifier_out.db3'
+        '/home/autodrive_devkit/src/tln_variants/train/dataset/porto_expert_v1/porto_expert_v1_0.db3'
 ]
 loss_figure_path = './Figures/loss_curve.png'
 DOWNSAMPLE_FACTOR = 2 # Down-sample Lidar data

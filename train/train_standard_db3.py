@@ -10,7 +10,12 @@ from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from typing import List, Tuple
 
-from tln_variants.utils import find_db3_files, read_ros2_bag, linear_map
+import numpy as np
+from ackermann_msgs.msg import AckermannDriveStamped
+from rclpy.serialization import deserialize_message
+from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
+from sensor_msgs.msg import LaserScan
+# from tln_variants.utils import find_db3_files, read_ros2_bag, linear_map
 
 DOWNSCALE_FACTOR = 2
 
@@ -112,7 +117,7 @@ if __name__ == '__main__':
     #"Good" model
 
     # TLN Standard
-    bag_paths = find_db3_files('/home/jackson/sim_ws/src/tln_variants/train/Dataset/ForzaNewDataset/raceline')
+    bag_paths = find_db3_files('/home/autodrive_devkit/src/tln_variants/train/dataset')
 
 
     # Bag path for decent model TLN_Forza WITH CUSTOM LOSS - Current prelim results
@@ -261,7 +266,7 @@ if __name__ == '__main__':
     batch_size = 64
     lr = 5e-5
     num_epochs = 15# 20 #10
-    model_name = 'test'
+    model_name = 'PurePursuit_CW_test'
     loss_figure_path = f'./Models/{model_name}_loss.png'
 
     all_lidar, all_servo, all_speed, all_ts = [], [], [], []
