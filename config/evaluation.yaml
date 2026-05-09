@@ -1,14 +1,28 @@
 evaluation:
   ros__parameters:
-    # topics and namespaces
-    ego_scan_topic: '/scan'
-    ego_odom_topic: '/ego_racecar/odom'
-    
-    #evaluation parameters
-    model_name: 'TLN_M'
-    
-    max_laps: 1
-    evaluation_lap: 0
-    centerline_path: '/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/example_centerline.csv'
-    map_path: '/home/jackson/sim_ws/src/f1tenth_gym_ros/maps/example'
+    # AutoDRIVE RoboRacer topics
+    ego_scan_topic:        '/autodrive/roboracer_1/lidar'
+    ego_odom_topic:        '/autodrive/roboracer_1/odom'
+    steering_topic:        '/autodrive/roboracer_1/steering_command'
+    throttle_topic:        '/autodrive/roboracer_1/throttle_command'
+    lap_count_topic:       '/autodrive/roboracer_1/lap_count'
+    collision_count_topic: '/autodrive/roboracer_1/collision_count'
+
+    # Run identifier — used as prefix for the output directory
+    model_name: 'TLN++_Hybrid'
+
+    # Stop after this many recorded laps (excluding warmup)
+    max_laps: 5
+
+    # Number of laps to discard at the start (data + collisions reset after each)
+    warmup_laps: 1
+
+    # Required: centerline CSV produced by centerline_processor (x_m,y_m,...)
+    centerline_path: '/home/autodrive_devkit/src/tln_variants/tln_variants/pure_pursuit/porto/porto_centerline.csv'
+
+    # Optional: base path to map YAML+image for trajectory overlay (omit extension)
+    map_path: ''
     map_img_ext: '.png'
+
+    # Where to write results (created if missing)
+    output_dir: '/home/autodrive_devkit/src/tln_variants/eval_results'
